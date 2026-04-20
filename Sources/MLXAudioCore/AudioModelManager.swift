@@ -803,7 +803,7 @@ public enum AudioModelManager {
   ///           not in the Component Registry; or any error thrown by
   ///           `Acervo.ensureComponentReady`, `withComponentAccess`,
   ///           `Acervo.modelDirectory(for:)`, or the closure itself.
-  public static func loadWithAcervoStrict<T: Sendable>(
+  public static func loadWithAcervoStrict<T>(
     componentId: String,
     load: @Sendable (URL) throws -> T
   ) async throws -> T {
@@ -819,11 +819,26 @@ public enum AudioModelManager {
     // and SHA verification cannot be bypassed. SwiftAcervo's `perform:` closure
     // is synchronous, which is fine: after `ensureComponentReady` has returned,
     // the actual weight-load work (e.g., MLX `loadArrays`) is CPU-bound and sync.
-    return try await AcervoManager.shared.withComponentAccess(componentId) { @Sendable _ in
+    //
+    // SwiftAcervo's `withComponentAccess<T: Sendable>` requires a Sendable return
+    // type. Many MLX model classes are not (nor need to be) Sendable — they are
+    // constructed once and handed back to the caller, never shared across
+    // actors. We launder the result through an `@unchecked Sendable` box so
+    // callers can return any T without marking their model types Sendable.
+    let box: _LoadBox<T> = try await AcervoManager.shared.withComponentAccess(componentId) { @Sendable _ in
       let modelDir = try Acervo.modelDirectory(for: descriptor.repoId)
-      return try load(modelDir)
+      return _LoadBox(value: try load(modelDir))
     }
+    return box.value
   }
+}
+
+/// Internal @unchecked Sendable box used by `loadWithAcervoStrict` to launder
+/// non-Sendable model types through SwiftAcervo's `withComponentAccess<T: Sendable>`.
+/// The boxed value is constructed once inside the managed-access scope, handed
+/// back to the caller, and never shared — the unchecked annotation is safe.
+private struct _LoadBox<V>: @unchecked Sendable {
+  let value: V
 }
 
 // MARK: - AudioModelManager Extensions for Codec-Specific Repos

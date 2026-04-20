@@ -241,13 +241,15 @@ public extension Mimi {
         ensureComponentsRegistered()
         print("[Mimi] Loading Mimi Audio Codec (PyTorch BF16) via loadWithAcervoStrict...")
 
-        let cfg = mimi_202407(numCodebooks: 32)
-        let modelInitStart = CFAbsoluteTimeGetCurrent()
-        let model = Mimi(cfg: cfg)
-        let modelInitTime = CFAbsoluteTimeGetCurrent() - modelInitStart
-        print(String(format: "[Mimi] Model initialization completed in %.2f seconds", modelInitTime))
-
         return try await AudioModelManager.loadWithAcervoStrict(componentId: "mimi-pytorch-bf16") { modelDir in
+            // Construct model inside the closure so it isn't captured from the
+            // outer @Sendable scope (the model type is not Sendable).
+            let cfg = mimi_202407(numCodebooks: 32)
+            let modelInitStart = CFAbsoluteTimeGetCurrent()
+            let model = Mimi(cfg: cfg)
+            let modelInitTime = CFAbsoluteTimeGetCurrent() - modelInitStart
+            print(String(format: "[Mimi] Model initialization completed in %.2f seconds", modelInitTime))
+
             let weightFileURL = modelDir.appendingPathComponent("tokenizer-e351c8d8-checkpoint125.safetensors")
 
             guard FileManager.default.fileExists(atPath: weightFileURL.path) else {
