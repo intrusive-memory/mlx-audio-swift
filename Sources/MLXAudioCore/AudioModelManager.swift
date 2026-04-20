@@ -681,14 +681,6 @@ public enum AudioModelManager {
     AudioModelRepo.allCases.first { $0.rawValue == modelId }
   }
 
-  /// Get the component ID for a registered model by its HuggingFace repo ID.
-  ///
-  /// - Parameter modelId: HuggingFace repo ID (e.g., `"mlx-community/snac_24khz"`)
-  /// - Returns: The Acervo component ID, or `nil` if not registered.
-  public static func componentId(for modelId: String) -> String? {
-    repo(for: modelId)?.componentId
-  }
-
   /// Ensure a specific audio model component is ready for use.
   ///
   /// Downloads missing files from HuggingFace via SwiftAcervo if needed.
@@ -775,6 +767,67 @@ public enum AudioModelManager {
     // Get model directory and execute body
     let modelDir = try Acervo.modelDirectory(for: modelRepo.rawValue)
     return try await body(modelDir)
+  }
+
+  /// Strict, descriptor-required loader that funnels every codec/LM weight load
+  /// through the Acervo Component Registry (v2 API).
+  ///
+  /// Entry point for all P1/P2 model load paths in mlx-audio-swift. The component
+  /// MUST be present in the Component Registry (registered via `ComponentDescriptor`).
+  /// No HuggingFace fallback, no legacy `ModelResolver` branch.
+  ///
+  /// Flow:
+  /// 1. Triggers lazy registration of all audio component descriptors.
+  /// 2. Verifies the component exists in the registry; throws
+  ///    `AcervoError.componentNotRegistered` if not.
+  /// 3. Ensures the component is downloaded + verified via
+  ///    `Acervo.ensureComponentReady`.
+  /// 4. Resolves the component's on-disk directory inside a
+  ///    `AcervoManager.shared.withComponentAccess` scope (which performs
+  ///    integrity verification of declared files).
+  /// 5. Invokes the caller's `load` closure with the resolved directory URL.
+  ///
+  /// Note: `withComponentAccess`'s `perform` closure is synchronous. To support
+  /// callers that need async work (tokenizer loading, etc.), we resolve the
+  /// directory URL inside the managed-access scope (where integrity checks run)
+  /// and then invoke the async `load` closure with that URL. The URL must not
+  /// be retained beyond the async load closure call.
+  ///
+  /// - Parameters:
+  ///   - componentId: The Acervo component ID (must be a registered
+  ///                  `ComponentDescriptor`).
+  ///   - load: Closure invoked with the on-disk directory URL for the resolved
+  ///           component after integrity verification has succeeded.
+  /// - Returns: Whatever the `load` closure returns.
+  /// - Throws: `AcervoError.componentNotRegistered(componentId)` if the id is
+  ///           not in the Component Registry; or any error thrown by
+  ///           `Acervo.ensureComponentReady`, `withComponentAccess`,
+  ///           `Acervo.modelDirectory(for:)`, or the closure itself.
+  public static func loadWithAcervoStrict<T: Sendable>(
+    componentId: String,
+    load: @Sendable (URL) async throws -> T
+  ) async throws -> T {
+    // Trigger lazy registration of all audio component descriptors.
+    _ = _registerAudioComponents
+
+    // Strict: the component MUST be in the registry.
+    guard let descriptor = Acervo.component(componentId) else {
+      throw AcervoError.componentNotRegistered(componentId)
+    }
+
+    // Ensure the component is downloaded & verified.
+    try await Acervo.ensureComponentReady(componentId)
+
+    // Run integrity-verified file access inside the managed-access scope,
+    // then extract the resolved base directory URL for the async load closure.
+    // withComponentAccess's `perform` closure is synchronous, so we resolve the
+    // directory URL inside the scope and pass it to the async load closure
+    // immediately after — the managed-access validation has already run and
+    // the caller's load closure is invoked with a verified directory.
+    let modelDir: URL = try await AcervoManager.shared.withComponentAccess(componentId) { @Sendable _ in
+      try Acervo.modelDirectory(for: descriptor.repoId)
+    }
+    return try await load(modelDir)
   }
 }
 

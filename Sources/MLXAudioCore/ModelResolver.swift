@@ -14,8 +14,6 @@ import SwiftAcervo
 /// Models downloaded by any intrusive-memory app are shared across all apps.
 public enum ModelResolver {
 
-    private static let migrationKey = "ModelResolver.didMigrateLegacyPaths"
-
     /// Resolve HF token from environment variable or Info.plist.
     public static func resolveHFToken() -> String? {
         ProcessInfo.processInfo.environment["HF_TOKEN"]
@@ -43,11 +41,9 @@ public enum ModelResolver {
         extensions: Set<String> = ["safetensors", "json", "txt"],
         hfToken: String? = nil
     ) async throws -> URL {
-        runMigrationIfNeeded()
-
         // P1 Optimization: Check if model is registered with Acervo
         // For P1 models, Acervo is the ONLY source (no HF fallback)
-        if let componentId = AudioModelManager.componentId(for: modelId) {
+        if let componentId = AudioModelManager.repo(for: modelId)?.componentId {
             print("Model \(modelId) is registered (component: \(componentId)), using Acervo v2 API...")
             AudioModelManager.ensureComponentsRegistered()
 
@@ -157,24 +153,5 @@ public enum ModelResolver {
             hfToken: hfToken
         )
         return dir.appendingPathComponent(fileName)
-    }
-
-    // MARK: - Legacy Migration
-
-    private static func runMigrationIfNeeded() {
-        guard !UserDefaults.standard.bool(forKey: migrationKey) else { return }
-        UserDefaults.standard.set(true, forKey: migrationKey)
-
-        do {
-            let migrated = try Acervo.migrateFromLegacyPaths()
-            if !migrated.isEmpty {
-                print("Migrated \(migrated.count) models to SharedModels:")
-                for model in migrated {
-                    print("  - \(model.id)")
-                }
-            }
-        } catch {
-            print("Warning: Legacy model migration failed: \(error)")
-        }
     }
 }
