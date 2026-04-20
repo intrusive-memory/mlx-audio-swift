@@ -1,6 +1,4 @@
 import Foundation
-import Hub
-import HuggingFace
 @preconcurrency import MLX
 import MLXAudioCodecs
 import MLXAudioCore
@@ -50,12 +48,19 @@ public final class MarvisTTSModel: Module {
 
     public convenience init(
         config: CSMModelArgs,
-        hub: HubApi = .shared,
         repoId: String,
         promptURLs: [URL]? = nil,
         progressHandler: @escaping (Progress) -> Void
     ) async throws {
-        let textTokenizer = try await loadTokenizer(configuration: ModelConfiguration(id: repoId), hub: hub)
+        // Resolve the model directory through Acervo (download + integrity-verify as
+        // needed) and load the tokenizer from the on-disk directory per
+        // swift-transformers 1.3.0 API.
+        let modelDirectoryURL = try await AudioModelManager.loadWithAcervoStrict(
+            componentId: "marvis-tts-250m-8bit"
+        ) { modelDir in
+            modelDir
+        }
+        let textTokenizer = try await AutoTokenizer.from(modelFolder: modelDirectoryURL)
         let codec = try await Mimi.fromPretrained(progressHandler: progressHandler)
         let audioTokenizer = MimiTokenizer(codec)
         self.init(
@@ -157,8 +162,6 @@ public extension MarvisTTSModel {
 
         // Step 1: Resolve model directory via Acervo and load sync-loadable assets
         // (config, audio prompt URLs, weights) inside the managed-access closure.
-        // NOTE: textTokenizer loading is deferred to WU6.2 (mlx-swift-lm 3.x bump);
-        //       HubApi / ModelConfiguration / loadTokenizer call sites remain untouched here.
         let (args, audioPromptURLs, weights, modelDirectoryURL) = try await AudioModelManager.loadWithAcervoStrict(
             componentId: "marvis-tts-250m-8bit"
         ) { modelDir in
@@ -182,7 +185,8 @@ public extension MarvisTTSModel {
         }
 
         // Step 2: Load async dependencies (tokenizer + audio codec).
-        // textTokenizer call site: deferred to WU6.2 (mlx-swift-lm 3.x bump).
+        // Tokenizer is loaded from the on-disk model directory per
+        // swift-transformers 1.3.0 API (`AutoTokenizer.from(modelFolder:)`).
         let textTokenizer = try await AutoTokenizer.from(modelFolder: modelDirectoryURL)
         let codec = try await Mimi.fromPretrained(progressHandler: progressHandler)
         let audioTokenizer = MimiTokenizer(codec)
@@ -218,11 +222,9 @@ public extension MarvisTTSModel {
     }
 
     static func fromPretrained(
-        hub: HubApi = .shared,
         repoId: String = "Marvis-AI/marvis-tts-250m-v0.2-MLX-8bit",
         progressHandler: @escaping (Progress) -> Void
     ) async throws -> MarvisTTSModel {
-        _ = hub
         return try await fromPretrained(repoId, progressHandler: progressHandler)
     }
     
