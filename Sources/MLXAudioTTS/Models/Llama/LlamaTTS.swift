@@ -911,11 +911,7 @@ public class LlamaTTSModel: Module, KVCacheDimensionProvider, SpeechGenerationMo
     /// - Returns: The loaded model
     public static func fromPretrained(_ modelRepo: String) async throws -> LlamaTTSModel {
         print("[LlamaTTS] Loading orpheus-tts-3b via Acervo strict API...")
-        // Capture modelDir from inside the sync closure so post_load_hook can use it.
-        var capturedModelDir: URL?
-        let model = try await AudioModelManager.loadWithAcervoStrict(componentId: "orpheus-tts-3b") { modelDir in
-            capturedModelDir = modelDir
-
+        let (model, modelDir): (LlamaTTSModel, URL) = try await AudioModelManager.loadWithAcervoStrict(componentId: "orpheus-tts-3b") { modelDir in
             let configPath = modelDir.appendingPathComponent("config.json")
             let configData = try Data(contentsOf: configPath)
             let config = try JSONDecoder().decode(LlamaTTSConfiguration.self, from: configData)
@@ -924,11 +920,9 @@ public class LlamaTTSModel: Module, KVCacheDimensionProvider, SpeechGenerationMo
 
             let model = LlamaTTSModel(config)
 
-            // Load weights from safetensors
             let weights = try llamaTTSLoadWeights(from: modelDir)
             let sanitizedWeights = model.sanitize(weights: weights)
 
-            // Quantize if needed
             if perLayerQuantization != nil {
                 print("Applying quantization from config...")
 
@@ -944,13 +938,9 @@ public class LlamaTTSModel: Module, KVCacheDimensionProvider, SpeechGenerationMo
             try model.update(parameters: ModuleParameters.unflattened(sanitizedWeights), verify: [.all])
             eval(model)
 
-            return model
+            return (model, modelDir)
         }
 
-        // post_load_hook is async (loads SNAC tokenizer), so it runs outside the sync closure.
-        guard let modelDir = capturedModelDir else {
-            throw AudioGenerationError.modelNotInitialized("LlamaTTS: modelDir was not captured from Acervo closure")
-        }
         try await model.post_load_hook(model: model, modelDir: modelDir)
 
         return model

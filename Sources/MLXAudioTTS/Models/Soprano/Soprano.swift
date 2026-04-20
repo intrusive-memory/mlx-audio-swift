@@ -875,19 +875,16 @@ public class SopranoModel: Module, KVCacheDimensionProvider, SpeechGenerationMod
 
     public static func fromPretrained(_ modelRepo: String) async throws -> SopranoModel {
         print("[SopranoTTS] Loading soprano-tts-80m via Acervo strict API...")
-        let model = try await AudioModelManager.loadWithAcervoStrict(componentId: "soprano-tts-80m") { modelDir in
-            // Load config
+        let (model, modelDir): (SopranoModel, URL) = try await AudioModelManager.loadWithAcervoStrict(componentId: "soprano-tts-80m") { modelDir in
             let configPath = modelDir.appendingPathComponent("config.json")
             let configData = try Data(contentsOf: configPath)
             let config = try JSONDecoder().decode(SopranoConfiguration.self, from: configData)
 
             let model = SopranoModel(config)
 
-            // Load weights
             let weights = try loadSopranoWeights(from: modelDir)
             let sanitizedWeights = model.sanitize(weights: weights)
 
-            // Apply quantization if needed
             if let perLayerQuant = config.perLayerQuantization {
                 quantize(model: model) { path, _ in
                     if weights["\(path).scales"] != nil {
@@ -900,11 +897,9 @@ public class SopranoModel: Module, KVCacheDimensionProvider, SpeechGenerationMod
             try model.update(parameters: ModuleParameters.unflattened(sanitizedWeights), verify: [.all])
             eval(model)
 
-            return model
+            return (model, modelDir)
         }
 
-        // Load tokenizer asynchronously outside the sync managed-access closure
-        let modelDir = try Acervo.modelDirectory(for: AudioModelRepo.sopranoTTS.rawValue)
         model.tokenizer = try await AutoTokenizer.from(modelFolder: modelDir)
         if model.tokenizer != nil {
             model.stopTokenId = model.tokenizer?.eosTokenId ?? 3
