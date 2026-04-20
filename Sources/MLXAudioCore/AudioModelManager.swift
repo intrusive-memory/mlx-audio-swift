@@ -78,6 +78,14 @@ public enum AudioModelRepo: String, CaseIterable, Sendable {
   /// Used by: SAM-Audio and generative models requiring continuous latent representations.
   case dacVAEWatermarked = "mlx-community/dacvae-watermarked"
 
+  /// Encodec 24 kHz (float32) neural audio codec — Meta's EnCodec at 24 kHz.
+  /// Used by: Vocos vocoder (`encodec_24khz` variant) as the underlying codec backend.
+  case encodec24kHz = "mlx-community/encodec-24khz-float32"
+
+  /// Encodec 48 kHz (float32) neural audio codec — Meta's EnCodec at 48 kHz.
+  /// Used by: Vocos vocoder (`encodec_48khz` variant) as the underlying codec backend.
+  case encodec48kHz = "mlx-community/encodec-48khz-float32"
+
   /// Human-readable display name for the model variant.
   public var displayName: String {
     switch self {
@@ -103,6 +111,10 @@ public enum AudioModelRepo: String, CaseIterable, Sendable {
       return "Qwen3-TTS 12Hz 1.7B CustomVoice (BF16)"
     case .dacVAEWatermarked:
       return "DAC VAE Audio Codec"
+    case .encodec24kHz:
+      return "Encodec 24 kHz Audio Codec (float32)"
+    case .encodec48kHz:
+      return "Encodec 48 kHz Audio Codec (float32)"
     }
   }
 
@@ -134,6 +146,10 @@ public enum AudioModelRepo: String, CaseIterable, Sendable {
       return "qwen3-tts-12hz-1.7b-custom-voice-bf16"
     case .dacVAEWatermarked:
       return "dac-vae"
+    case .encodec24kHz:
+      return "encodec-24khz"
+    case .encodec48kHz:
+      return "encodec-48khz"
     }
   }
 
@@ -143,7 +159,7 @@ public enum AudioModelRepo: String, CaseIterable, Sendable {
   /// TTS models are language models (autoregressive generative models).
   public var componentType: ComponentType {
     switch self {
-    case .snac24kHz, .mimiPyTorchBF16, .dacVAEWatermarked:
+    case .snac24kHz, .mimiPyTorchBF16, .dacVAEWatermarked, .encodec24kHz, .encodec48kHz:
       return .decoder
     case .vyvoTTSBeta4bit, .orpheusTTS, .sopranoTTS, .marvisTTS, .pocketTTS,
          .qwen3TTS12Hz1_7BBaseBF16, .qwen3TTS12Hz1_7BVoiceDesignBF16,
@@ -177,6 +193,15 @@ private let mimiPyTorchBF16RequiredFiles: [ComponentFile] = [
 private let dacVAEWatermarkedRequiredFiles: [ComponentFile] = [
   ComponentFile(relativePath: "config.json"),
   ComponentFile(relativePath: "model.safetensors"),
+]
+
+/// Required files shared by all Encodec model variants (24 kHz and 48 kHz).
+///
+/// Both repos ship the same three-file layout: config, weight file, and sharded-weight index.
+private let encodecRequiredFiles: [ComponentFile] = [
+  ComponentFile(relativePath: "config.json"),
+  ComponentFile(relativePath: "model.safetensors"),
+  ComponentFile(relativePath: "model.safetensors.index.json"),
 ]
 
 // MARK: - P2 TTS Model Files
@@ -318,6 +343,34 @@ private let audioComponentDescriptors: [ComponentDescriptor] = [
     minimumMemoryBytes: 500_000_000,
     metadata: [
       "modelType": "codec",
+      "stage": "P2",
+    ]
+  ),
+  ComponentDescriptor(
+    id: AudioModelRepo.encodec24kHz.componentId,
+    type: .decoder,
+    displayName: "Encodec 24 kHz Audio Codec (float32)",
+    repoId: AudioModelRepo.encodec24kHz.rawValue,
+    files: encodecRequiredFiles,
+    estimatedSizeBytes: 80_000_000,
+    minimumMemoryBytes: 200_000_000,
+    metadata: [
+      "modelType": "codec",
+      "sampleRate": "24000",
+      "stage": "P2",
+    ]
+  ),
+  ComponentDescriptor(
+    id: AudioModelRepo.encodec48kHz.componentId,
+    type: .decoder,
+    displayName: "Encodec 48 kHz Audio Codec (float32)",
+    repoId: AudioModelRepo.encodec48kHz.rawValue,
+    files: encodecRequiredFiles,
+    estimatedSizeBytes: 80_000_000,
+    minimumMemoryBytes: 200_000_000,
+    metadata: [
+      "modelType": "codec",
+      "sampleRate": "48000",
       "stage": "P2",
     ]
   ),
