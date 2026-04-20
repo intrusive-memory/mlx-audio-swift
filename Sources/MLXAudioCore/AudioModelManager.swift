@@ -86,6 +86,13 @@ public enum AudioModelRepo: String, CaseIterable, Sendable {
   /// Used by: Vocos vocoder (`encodec_48khz` variant) as the underlying codec backend.
   case encodec48kHz = "mlx-community/encodec-48khz-float32"
 
+  // MARK: - ASR Models (P2 — Extended)
+
+  /// GLM-ASR Nano (4-bit quantized) automatic speech recognition model.
+  /// Compact, quantized speech-to-text model based on the GLM architecture.
+  /// Used by: MLXAudioSTT for on-device transcription.
+  case glmASRNano2512_4bit = "mlx-community/GLM-ASR-Nano-2512-4bit"
+
   /// Human-readable display name for the model variant.
   public var displayName: String {
     switch self {
@@ -115,6 +122,8 @@ public enum AudioModelRepo: String, CaseIterable, Sendable {
       return "Encodec 24 kHz Audio Codec (float32)"
     case .encodec48kHz:
       return "Encodec 48 kHz Audio Codec (float32)"
+    case .glmASRNano2512_4bit:
+      return "GLM-ASR Nano (4-bit)"
     }
   }
 
@@ -150,6 +159,8 @@ public enum AudioModelRepo: String, CaseIterable, Sendable {
       return "encodec-24khz"
     case .encodec48kHz:
       return "encodec-48khz"
+    case .glmASRNano2512_4bit:
+      return "glm-asr"
     }
   }
 
@@ -165,6 +176,8 @@ public enum AudioModelRepo: String, CaseIterable, Sendable {
          .qwen3TTS12Hz1_7BBaseBF16, .qwen3TTS12Hz1_7BVoiceDesignBF16,
          .qwen3TTS12Hz1_7BCustomVoiceBF16:
       return .languageModel
+    case .glmASRNano2512_4bit:
+      return .encoder
     }
   }
 }
@@ -202,6 +215,19 @@ private let encodecRequiredFiles: [ComponentFile] = [
   ComponentFile(relativePath: "config.json"),
   ComponentFile(relativePath: "model.safetensors"),
   ComponentFile(relativePath: "model.safetensors.index.json"),
+]
+
+// MARK: - P2 ASR Model Files
+
+/// Required files for the GLM-ASR Nano (4-bit quantized) model.
+///
+/// Swift-runtime files only; Python reference scripts shipped in the repo are excluded.
+private let glmASRNano2512_4bitRequiredFiles: [ComponentFile] = [
+  ComponentFile(relativePath: "config.json"),
+  ComponentFile(relativePath: "model.safetensors"),
+  ComponentFile(relativePath: "model.safetensors.index.json"),
+  ComponentFile(relativePath: "tokenizer.json"),
+  ComponentFile(relativePath: "tokenizer_config.json"),
 ]
 
 // MARK: - P2 TTS Model Files
@@ -371,6 +397,23 @@ private let audioComponentDescriptors: [ComponentDescriptor] = [
     metadata: [
       "modelType": "codec",
       "sampleRate": "48000",
+      "stage": "P2",
+    ]
+  ),
+
+  // MARK: - P2 ASR Models (Extended)
+
+  ComponentDescriptor(
+    id: AudioModelRepo.glmASRNano2512_4bit.componentId,
+    type: .encoder,
+    displayName: "GLM-ASR Nano (4-bit)",
+    repoId: AudioModelRepo.glmASRNano2512_4bit.rawValue,
+    files: glmASRNano2512_4bitRequiredFiles,
+    estimatedSizeBytes: 600_000_000,
+    minimumMemoryBytes: 1_200_000_000,
+    metadata: [
+      "modelType": "asr",
+      "quantization": "4-bit",
       "stage": "P2",
     ]
   ),

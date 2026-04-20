@@ -27,6 +27,7 @@ jobs:
           - {id: dac-vae, repo: mlx-community/dacvae-watermarked, slug: mlx-community_dacvae-watermarked}
           - {id: encodec-24khz, repo: mlx-community/encodec-24khz-float32, slug: mlx-community_encodec-24khz-float32}
           - {id: encodec-48khz, repo: mlx-community/encodec-48khz-float32, slug: mlx-community_encodec-48khz-float32}
+          - {id: glm-asr, repo: mlx-community/GLM-ASR-Nano-2512-4bit, slug: mlx-community_GLM-ASR-Nano-2512-4bit}
 
     env:
       MODEL_ID: ${{ matrix.model.id }}
