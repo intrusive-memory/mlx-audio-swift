@@ -57,6 +57,20 @@ public enum AudioModelRepo: String, CaseIterable, Sendable {
   /// Compact TTS model for on-device synthesis.
   case pocketTTS = "mlx-community/pocket-tts"
 
+  /// Qwen3-TTS 12Hz 1.7B Base (bfloat16).
+  /// Base conditional generation model supporting x-vector speaker embedding
+  /// (from reference audio) and in-context voice cloning (ICL). Ships the
+  /// ECAPA-TDNN speaker encoder.
+  case qwen3TTS12Hz1_7BBaseBF16 = "mlx-community/Qwen3-TTS-12Hz-1.7B-Base-bf16"
+
+  /// Qwen3-TTS 12Hz 1.7B VoiceDesign (bfloat16).
+  /// Text-described voice generation (instruct-style prompt); no speaker encoder.
+  case qwen3TTS12Hz1_7BVoiceDesignBF16 = "mlx-community/Qwen3-TTS-12Hz-1.7B-VoiceDesign-bf16"
+
+  /// Qwen3-TTS 12Hz 1.7B CustomVoice (bfloat16).
+  /// Predefined named-speaker generation; no speaker encoder.
+  case qwen3TTS12Hz1_7BCustomVoiceBF16 = "mlx-community/Qwen3-TTS-12Hz-1.7B-CustomVoice-bf16"
+
   /// Human-readable display name for the model variant.
   public var displayName: String {
     switch self {
@@ -74,6 +88,12 @@ public enum AudioModelRepo: String, CaseIterable, Sendable {
       return "MarvisTTS (250M, 8-bit)"
     case .pocketTTS:
       return "PocketTTS (Multi-voice)"
+    case .qwen3TTS12Hz1_7BBaseBF16:
+      return "Qwen3-TTS 12Hz 1.7B Base (BF16)"
+    case .qwen3TTS12Hz1_7BVoiceDesignBF16:
+      return "Qwen3-TTS 12Hz 1.7B VoiceDesign (BF16)"
+    case .qwen3TTS12Hz1_7BCustomVoiceBF16:
+      return "Qwen3-TTS 12Hz 1.7B CustomVoice (BF16)"
     }
   }
 
@@ -97,6 +117,12 @@ public enum AudioModelRepo: String, CaseIterable, Sendable {
       return "marvis-tts-250m-8bit"
     case .pocketTTS:
       return "pocket-tts"
+    case .qwen3TTS12Hz1_7BBaseBF16:
+      return "qwen3-tts-12hz-1.7b-base-bf16"
+    case .qwen3TTS12Hz1_7BVoiceDesignBF16:
+      return "qwen3-tts-12hz-1.7b-voice-design-bf16"
+    case .qwen3TTS12Hz1_7BCustomVoiceBF16:
+      return "qwen3-tts-12hz-1.7b-custom-voice-bf16"
     }
   }
 
@@ -108,7 +134,9 @@ public enum AudioModelRepo: String, CaseIterable, Sendable {
     switch self {
     case .snac24kHz, .mimiPyTorchBF16:
       return .decoder
-    case .vyvoTTSBeta4bit, .orpheusTTS, .sopranoTTS, .marvisTTS, .pocketTTS:
+    case .vyvoTTSBeta4bit, .orpheusTTS, .sopranoTTS, .marvisTTS, .pocketTTS,
+         .qwen3TTS12Hz1_7BBaseBF16, .qwen3TTS12Hz1_7BVoiceDesignBF16,
+         .qwen3TTS12Hz1_7BCustomVoiceBF16:
       return .languageModel
     }
   }
@@ -176,6 +204,48 @@ private let pocketTTSRequiredFiles: [ComponentFile] = [
   ComponentFile(relativePath: "config.json"),
   ComponentFile(relativePath: "model.safetensors"),
   ComponentFile(relativePath: "tokenizer.json"),
+]
+
+// MARK: - Qwen3-TTS 12Hz 1.7B Variants (Base / VoiceDesign / CustomVoice)
+//
+// These three repos share a file layout:
+//   - Top-level: config.json, vocab.json, merges.txt, tokenizer_config.json, model.safetensors
+//   - speech_tokenizer/: config.json, model.safetensors
+// tokenizer.json is NOT shipped; Qwen3TTSModel.fromPretrained generates it on first load
+// from vocab.json + merges.txt + tokenizer_config.json.
+// Speaker encoder weights (Base variant only) are bundled inside the top-level model.safetensors.
+
+/// Required files for Qwen3-TTS 12Hz 1.7B Base (bfloat16).
+private let qwen3TTS12Hz1_7BBaseBF16RequiredFiles: [ComponentFile] = [
+  ComponentFile(relativePath: "config.json"),
+  ComponentFile(relativePath: "vocab.json"),
+  ComponentFile(relativePath: "merges.txt"),
+  ComponentFile(relativePath: "tokenizer_config.json"),
+  ComponentFile(relativePath: "model.safetensors"),
+  ComponentFile(relativePath: "speech_tokenizer/config.json"),
+  ComponentFile(relativePath: "speech_tokenizer/model.safetensors"),
+]
+
+/// Required files for Qwen3-TTS 12Hz 1.7B VoiceDesign (bfloat16).
+private let qwen3TTS12Hz1_7BVoiceDesignBF16RequiredFiles: [ComponentFile] = [
+  ComponentFile(relativePath: "config.json"),
+  ComponentFile(relativePath: "vocab.json"),
+  ComponentFile(relativePath: "merges.txt"),
+  ComponentFile(relativePath: "tokenizer_config.json"),
+  ComponentFile(relativePath: "model.safetensors"),
+  ComponentFile(relativePath: "speech_tokenizer/config.json"),
+  ComponentFile(relativePath: "speech_tokenizer/model.safetensors"),
+]
+
+/// Required files for Qwen3-TTS 12Hz 1.7B CustomVoice (bfloat16).
+private let qwen3TTS12Hz1_7BCustomVoiceBF16RequiredFiles: [ComponentFile] = [
+  ComponentFile(relativePath: "config.json"),
+  ComponentFile(relativePath: "vocab.json"),
+  ComponentFile(relativePath: "merges.txt"),
+  ComponentFile(relativePath: "tokenizer_config.json"),
+  ComponentFile(relativePath: "model.safetensors"),
+  ComponentFile(relativePath: "speech_tokenizer/config.json"),
+  ComponentFile(relativePath: "speech_tokenizer/model.safetensors"),
 ]
 
 /// All audio model component descriptors (P1 + P2).
@@ -298,6 +368,69 @@ private let audioComponentDescriptors: [ComponentDescriptor] = [
     metadata: [
       "sampleRate": "22050",
       "voices": "multi",
+      "modelType": "tts",
+      "stage": "P2",
+    ]
+  ),
+
+  // MARK: - Qwen3-TTS 12Hz 1.7B Variants (Base / VoiceDesign / CustomVoice)
+
+  ComponentDescriptor(
+    id: AudioModelRepo.qwen3TTS12Hz1_7BBaseBF16.componentId,
+    type: .languageModel,
+    displayName: "Qwen3-TTS 12Hz 1.7B Base (BF16)",
+    repoId: AudioModelRepo.qwen3TTS12Hz1_7BBaseBF16.rawValue,
+    files: qwen3TTS12Hz1_7BBaseBF16RequiredFiles,
+    estimatedSizeBytes: 3_500_000_000,
+    minimumMemoryBytes: 6_000_000_000,
+    metadata: [
+      "sampleRate": "24000",
+      "codecFrameRate": "12",
+      "params": "1.7B",
+      "dtype": "bfloat16",
+      "ttsModelType": "base",
+      "voiceSource": "x-vector-from-ref-audio",
+      "hasSpeakerEncoder": "true",
+      "modelType": "tts",
+      "stage": "P2",
+    ]
+  ),
+  ComponentDescriptor(
+    id: AudioModelRepo.qwen3TTS12Hz1_7BVoiceDesignBF16.componentId,
+    type: .languageModel,
+    displayName: "Qwen3-TTS 12Hz 1.7B VoiceDesign (BF16)",
+    repoId: AudioModelRepo.qwen3TTS12Hz1_7BVoiceDesignBF16.rawValue,
+    files: qwen3TTS12Hz1_7BVoiceDesignBF16RequiredFiles,
+    estimatedSizeBytes: 3_500_000_000,
+    minimumMemoryBytes: 6_000_000_000,
+    metadata: [
+      "sampleRate": "24000",
+      "codecFrameRate": "12",
+      "params": "1.7B",
+      "dtype": "bfloat16",
+      "ttsModelType": "voice_design",
+      "voiceSource": "text-description",
+      "hasSpeakerEncoder": "false",
+      "modelType": "tts",
+      "stage": "P2",
+    ]
+  ),
+  ComponentDescriptor(
+    id: AudioModelRepo.qwen3TTS12Hz1_7BCustomVoiceBF16.componentId,
+    type: .languageModel,
+    displayName: "Qwen3-TTS 12Hz 1.7B CustomVoice (BF16)",
+    repoId: AudioModelRepo.qwen3TTS12Hz1_7BCustomVoiceBF16.rawValue,
+    files: qwen3TTS12Hz1_7BCustomVoiceBF16RequiredFiles,
+    estimatedSizeBytes: 3_500_000_000,
+    minimumMemoryBytes: 6_000_000_000,
+    metadata: [
+      "sampleRate": "24000",
+      "codecFrameRate": "12",
+      "params": "1.7B",
+      "dtype": "bfloat16",
+      "ttsModelType": "custom_voice",
+      "voiceSource": "predefined-named-speakers",
+      "hasSpeakerEncoder": "false",
       "modelType": "tts",
       "stage": "P2",
     ]
