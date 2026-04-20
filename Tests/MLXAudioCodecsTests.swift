@@ -92,12 +92,9 @@ struct MimiTests {
 
         // 2. Load Mimi model from HuggingFace
         print("\u{001B}[33mLoading Mimi model...\u{001B}[0m")
-        let mimi = try await Mimi.fromPretrained(
-            repoId: "kyutai/moshiko-pytorch-bf16",
-            filename: "tokenizer-e351c8d8-checkpoint125.safetensors"
-        ) { progress in
+        let mimi = try await Mimi.fromPretrained(progressHandler: { progress in
             print("Download progress: \(progress.fractionCompleted * 100)%")
-        }
+        })
         print("\u{001B}[32mMimi model loaded!\u{001B}[0m")
 
         // 3. Reshape audio for Mimi: [batch, channels, samples]
