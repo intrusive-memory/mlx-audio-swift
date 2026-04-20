@@ -10,7 +10,6 @@ import MLX
 import MLXNN
 import MLXAudioCore
 import MLXLMCommon
-import HuggingFace
 import Tokenizers
 
 // MARK: - Audio Processing Constants
@@ -559,65 +558,77 @@ public class GLMASRModel: Module {
     }
 
     /// Load model from pretrained weights.
+    ///
+    /// Uses a two-phase approach (Option c): model construction and weight loading
+    /// happen synchronously inside `loadWithAcervoStrict`'s managed-access closure,
+    /// then the async tokenizer load runs outside the closure using the returned
+    /// directory URL. Tokenizer files are read-only on disk after integrity
+    /// verification, making this relaxation safe.
     public static func fromPretrained(_ modelPath: String) async throws -> GLMASRModel {
-        let modelDir = try await ModelResolver.resolve(modelId: modelPath)
+        // Phase 1 — construct model and load weights inside managed-access scope.
+        let (model, modelDir): (GLMASRModel, URL) = try await AudioModelManager.loadWithAcervoStrict(
+            componentId: "glm-asr"
+        ) { modelDir in
+            // Load config
+            let configPath = modelDir.appendingPathComponent("config.json")
+            let configData = try Data(contentsOf: configPath)
+            let config = try JSONDecoder().decode(GLMASRModelConfig.self, from: configData)
 
-        // Load config
-        let configPath = modelDir.appendingPathComponent("config.json")
-        let configData = try Data(contentsOf: configPath)
-        let config = try JSONDecoder().decode(GLMASRModelConfig.self, from: configData)
+            // Get per-layer quantization
+            let perLayerQuantization = config.perLayerQuantization
 
-        // Get per-layer quantization
-        let perLayerQuantization = config.perLayerQuantization
+            // Create model
+            let model = GLMASRModel(config: config)
 
-        // Create model
-        let model = GLMASRModel(config: config)
+            // Load weights
+            var weights: [String: MLXArray] = [:]
+            let fileManager = FileManager.default
+            let files = try fileManager.contentsOfDirectory(at: modelDir, includingPropertiesForKeys: nil)
+            let safetensorFiles = files.filter { $0.pathExtension == "safetensors" }
 
-        // Load tokenizer
+            for file in safetensorFiles {
+                let fileWeights = try MLX.loadArrays(url: file)
+                weights.merge(fileWeights) { _, new in new }
+            }
+
+            // Sanitize and load weights
+            let sanitizedWeights = model.sanitize(weights: weights)
+
+            // Quantize if needed
+            if perLayerQuantization != nil {
+                print("Applying quantization from config...")
+
+                if let perLayerQuant = perLayerQuantization {
+                    print(" Per-layer: \(perLayerQuant)")
+                }
+
+                quantize(model: model) { path, module in
+                    // Convert model path back to original weight path for scales check
+                    var origPath = path
+                    if origPath.hasPrefix("language_model.model.") {
+                        origPath = String(origPath.dropFirst("language_model.".count))
+                    } else if origPath.hasPrefix("language_model.lm_head") {
+                        origPath = String(origPath.dropFirst("language_model.".count))
+                    }
+
+                    // Check if scales exist for this layer in sanitized weights
+                    if sanitizedWeights["\(path).scales"] != nil {
+                        return perLayerQuantization?.quantization(layer: origPath)?.asTuple
+                    } else {
+                        return nil
+                    }
+                }
+            }
+            try model.update(parameters: ModuleParameters.unflattened(sanitizedWeights), verify: [.all])
+
+            eval(model)
+
+            return (model, modelDir)
+        }
+
+        // Phase 2 — load tokenizer async outside managed-access scope.
+        // Tokenizer files are read-only on disk post-verification; this is safe.
         model.tokenizer = try await AutoTokenizer.from(modelFolder: modelDir)
-
-        // Load weights
-        var weights: [String: MLXArray] = [:]
-        let fileManager = FileManager.default
-        let files = try fileManager.contentsOfDirectory(at: modelDir, includingPropertiesForKeys: nil)
-        let safetensorFiles = files.filter { $0.pathExtension == "safetensors" }
-
-        for file in safetensorFiles {
-            let fileWeights = try MLX.loadArrays(url: file)
-            weights.merge(fileWeights) { _, new in new }
-        }
-
-        // Sanitize and load weights
-        let sanitizedWeights = model.sanitize(weights: weights)
-
-        // Quantize if needed
-        if perLayerQuantization != nil {
-            print("Applying quantization from config...")
-
-            if let perLayerQuant = perLayerQuantization {
-                print(" Per-layer: \(perLayerQuant)")
-            }
-
-            quantize(model: model) { path, module in
-                // Convert model path back to original weight path for scales check
-                var origPath = path
-                if origPath.hasPrefix("language_model.model.") {
-                    origPath = String(origPath.dropFirst("language_model.".count))
-                } else if origPath.hasPrefix("language_model.lm_head") {
-                    origPath = String(origPath.dropFirst("language_model.".count))
-                }
-
-                // Check if scales exist for this layer in sanitized weights
-                if sanitizedWeights["\(path).scales"] != nil {
-                    return perLayerQuantization?.quantization(layer: origPath)?.asTuple
-                } else {
-                    return nil
-                }
-            }
-        }
-        try model.update(parameters: ModuleParameters.unflattened(sanitizedWeights), verify: [.all])
-
-        eval(model)
 
         return model
     }
