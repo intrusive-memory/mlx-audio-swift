@@ -5,7 +5,6 @@
 import MLXNN
 @preconcurrency import MLXLMCommon
 import MLXAudioCore
-import HuggingFace
 import Tokenizers
 import Foundation
 
@@ -1579,106 +1578,133 @@ public final class Qwen3TTSModel: Module, SpeechGenerationModel, @unchecked Send
 
     // MARK: - Model Loading
 
-    /// Load a Qwen3-TTS model from a HuggingFace repository.
+    /// Load a Qwen3-TTS model from a registered Acervo component.
     ///
-    /// Downloads (or resolves from cache) the model weights, tokenizer, speech
-    /// tokenizer, and optional speaker encoder.  If the repository ships only a
-    /// slow tokenizer (`vocab.json` + `merges.txt`), a fast `tokenizer.json`
-    /// is generated automatically.
+    /// Resolves the component via the Acervo Component Registry, loads the model
+    /// weights, speech tokenizer, and optional speaker encoder synchronously inside
+    /// the managed-access scope (phase 1), then loads the async tokenizer outside
+    /// the scope (phase 2).  If the repository ships only a slow tokenizer
+    /// (`vocab.json` + `merges.txt`), a fast `tokenizer.json` is generated
+    /// automatically during phase 1.
     ///
-    /// - Parameter modelRepo: HuggingFace repository ID (e.g. "Qwen/Qwen3-TTS").
+    /// - Parameter modelRepo: HuggingFace repository ID used to select the
+    ///   correct Acervo componentId via variant dispatch.
     /// - Returns: A fully initialised ``Qwen3TTSModel`` ready for generation.
     public static func fromPretrained(_ modelRepo: String) async throws -> Qwen3TTSModel {
-        let repoID = Repo.ID(rawValue: modelRepo)!
-        let modelDir = try await ModelUtils.resolveOrDownloadModel(
-            repoID: repoID, requiredExtension: "safetensors"
-        )
-
-        // Load main config
-        let configData = try Data(contentsOf: modelDir.appendingPathComponent("config.json"))
-        let config = try JSONDecoder().decode(Qwen3TTSModelConfig.self, from: configData)
-
-        let model = Qwen3TTSModel(config: config)
-
-        // Load talker weights
-        var allWeights = [String: MLXArray]()
-        let fm = FileManager.default
-        let modelFiles = try fm.contentsOfDirectory(at: modelDir, includingPropertiesForKeys: nil)
-        for file in modelFiles where file.pathExtension == "safetensors" {
-            let weights = try MLX.loadArrays(url: file)
-            allWeights.merge(weights) { _, new in new }
+        // Map HuggingFace repo ID → Acervo componentId (variant dispatch)
+        let componentId: String
+        switch modelRepo {
+        case "mlx-community/VyvoTTS-EN-Beta-4bit":
+            componentId = "vyvo-tts-beta-4bit"
+        case "mlx-community/Qwen3-TTS-12Hz-1.7B-Base-bf16":
+            componentId = "qwen3-tts-12hz-1.7b-base-bf16"
+        case "mlx-community/Qwen3-TTS-12Hz-1.7B-VoiceDesign-bf16":
+            componentId = "qwen3-tts-12hz-1.7b-voice-design-bf16"
+        case "mlx-community/Qwen3-TTS-12Hz-1.7B-CustomVoice-bf16":
+            componentId = "qwen3-tts-12hz-1.7b-custom-voice-bf16"
+        default:
+            throw NSError(
+                domain: "MLXAudioTTS.Qwen3TTS",
+                code: 1,
+                userInfo: [
+                    NSLocalizedDescriptionKey:
+                        "Unknown Qwen3 TTS repo '\(modelRepo)'. Register a ComponentDescriptor for it first."
+                ]
+            )
         }
 
-        // Sanitize and load talker weights
-        let talkerWeights = Qwen3TTSTalkerForConditionalGeneration.sanitize(weights: allWeights)
-        let talkerPairs = talkerWeights.map { ($0.key, $0.value) }
-        try model.talker.update(parameters: ModuleParameters.unflattened(talkerPairs), verify: .noUnusedKeys)
-        eval(model.talker.parameters())
+        // Phase 1 — construct model and load weights inside managed-access scope (sync).
+        let (model, modelDir): (Qwen3TTSModel, URL) = try await AudioModelManager.loadWithAcervoStrict(
+            componentId: componentId
+        ) { modelDir in
+            // Load main config
+            let configData = try Data(contentsOf: modelDir.appendingPathComponent("config.json"))
+            let config = try JSONDecoder().decode(Qwen3TTSModelConfig.self, from: configData)
 
-        // Generate tokenizer.json if missing (Qwen3-TTS ships without it)
-        let tokenizerJsonPath = modelDir.appendingPathComponent("tokenizer.json")
-        if !fm.fileExists(atPath: tokenizerJsonPath.path) {
-            let vocabPath = modelDir.appendingPathComponent("vocab.json")
-            let mergesPath = modelDir.appendingPathComponent("merges.txt")
-            let hasVocab = fm.fileExists(atPath: vocabPath.path)
-            let hasMerges = fm.fileExists(atPath: mergesPath.path)
-            if hasVocab && hasMerges {
-                do {
-                    try generateTokenizerJson(
-                        vocabPath: vocabPath,
-                        mergesPath: mergesPath,
-                        tokenizerConfigPath: modelDir.appendingPathComponent("tokenizer_config.json"),
-                        outputPath: tokenizerJsonPath
-                    )
-                    print("Generated tokenizer.json from vocab.json + merges.txt")
-                } catch {
-                    print("Warning: Failed to generate tokenizer.json: \(error)")
-                }
-            } else {
-                print("Warning: Cannot generate tokenizer.json — vocab.json: \(hasVocab), merges.txt: \(hasMerges)")
+            let model = Qwen3TTSModel(config: config)
+
+            // Load talker weights
+            var allWeights = [String: MLXArray]()
+            let fm = FileManager.default
+            let modelFiles = try fm.contentsOfDirectory(at: modelDir, includingPropertiesForKeys: nil)
+            for file in modelFiles where file.pathExtension == "safetensors" {
+                let weights = try MLX.loadArrays(url: file)
+                allWeights.merge(weights) { _, new in new }
             }
+
+            // Sanitize and load talker weights
+            let talkerWeights = Qwen3TTSTalkerForConditionalGeneration.sanitize(weights: allWeights)
+            let talkerPairs = talkerWeights.map { ($0.key, $0.value) }
+            try model.talker.update(parameters: ModuleParameters.unflattened(talkerPairs), verify: .noUnusedKeys)
+            eval(model.talker.parameters())
+
+            // Generate tokenizer.json if missing (Qwen3-TTS ships without it)
+            let tokenizerJsonPath = modelDir.appendingPathComponent("tokenizer.json")
+            if !fm.fileExists(atPath: tokenizerJsonPath.path) {
+                let vocabPath = modelDir.appendingPathComponent("vocab.json")
+                let mergesPath = modelDir.appendingPathComponent("merges.txt")
+                let hasVocab = fm.fileExists(atPath: vocabPath.path)
+                let hasMerges = fm.fileExists(atPath: mergesPath.path)
+                if hasVocab && hasMerges {
+                    do {
+                        try generateTokenizerJson(
+                            vocabPath: vocabPath,
+                            mergesPath: mergesPath,
+                            tokenizerConfigPath: modelDir.appendingPathComponent("tokenizer_config.json"),
+                            outputPath: tokenizerJsonPath
+                        )
+                        print("Generated tokenizer.json from vocab.json + merges.txt")
+                    } catch {
+                        print("Warning: Failed to generate tokenizer.json: \(error)")
+                    }
+                } else {
+                    print("Warning: Cannot generate tokenizer.json — vocab.json: \(hasVocab), merges.txt: \(hasMerges)")
+                }
+            }
+
+            // Load speech tokenizer — check that it's a directory, not a stale file
+            let speechTokenizerPath = modelDir.appendingPathComponent("speech_tokenizer")
+            var isDir: ObjCBool = false
+            if fm.fileExists(atPath: speechTokenizerPath.path, isDirectory: &isDir), isDir.boolValue {
+                try loadSpeechTokenizer(model: model, path: speechTokenizerPath)
+            } else if fm.fileExists(atPath: speechTokenizerPath.path) {
+                // speech_tokenizer exists but is not a directory — stale cache
+                // Remove the entire model cache so it re-downloads cleanly next time
+                print("speech_tokenizer is not a directory (stale cache), clearing model cache...")
+                try? fm.removeItem(at: modelDir)
+                throw AudioGenerationError.modelNotInitialized(
+                    "Model cache was corrupted (speech_tokenizer). It has been cleared. Please try loading again."
+                )
+            } else {
+                print("Warning: speech_tokenizer directory not found, speech decoding unavailable")
+            }
+
+            // Load speaker encoder if config has speaker_encoder_config (Base model only)
+            if let speakerEncoderConfig = config.speakerEncoderConfig {
+                let speakerEncoder = Qwen3TTSSpeakerEncoder(config: speakerEncoderConfig)
+                let sanitizedWeights = Qwen3TTSSpeakerEncoder.sanitize(weights: allWeights)
+                if !sanitizedWeights.isEmpty {
+                    let pairs = sanitizedWeights.map { ($0.key, $0.value) }
+                    try speakerEncoder.update(parameters: ModuleParameters.unflattened(pairs), verify: .noUnusedKeys)
+                    eval(speakerEncoder.parameters())
+                    model.speakerEncoder = speakerEncoder
+                    print("Loaded speaker encoder (\(speakerEncoderConfig.encDim)-dim)")
+                } else {
+                    print("Warning: speaker_encoder_config present but no speaker_encoder weights found")
+                }
+            }
+
+            print("Loaded Qwen3-TTS model (\(config.ttsModelType))")
+            return (model, modelDir)
         }
 
-        // Load tokenizer
+        // Phase 2 — async tokenizer load outside managed-access scope.
         do {
             model.tokenizer = try await AutoTokenizer.from(modelFolder: modelDir)
         } catch {
             print("Warning: Could not load tokenizer: \(error)")
         }
 
-        // Load speech tokenizer — check that it's a directory, not a stale file
-        let speechTokenizerPath = modelDir.appendingPathComponent("speech_tokenizer")
-        var isDir: ObjCBool = false
-        if fm.fileExists(atPath: speechTokenizerPath.path, isDirectory: &isDir), isDir.boolValue {
-            try loadSpeechTokenizer(model: model, path: speechTokenizerPath)
-        } else if fm.fileExists(atPath: speechTokenizerPath.path) {
-            // speech_tokenizer exists but is not a directory — stale cache
-            // Remove the entire model cache so it re-downloads cleanly next time
-            print("speech_tokenizer is not a directory (stale cache), clearing model cache...")
-            try? fm.removeItem(at: modelDir)
-            throw AudioGenerationError.modelNotInitialized(
-                "Model cache was corrupted (speech_tokenizer). It has been cleared. Please try loading again."
-            )
-        } else {
-            print("Warning: speech_tokenizer directory not found, speech decoding unavailable")
-        }
-
-        // Load speaker encoder if config has speaker_encoder_config (Base model only)
-        if let speakerEncoderConfig = config.speakerEncoderConfig {
-            let speakerEncoder = Qwen3TTSSpeakerEncoder(config: speakerEncoderConfig)
-            let sanitizedWeights = Qwen3TTSSpeakerEncoder.sanitize(weights: allWeights)
-            if !sanitizedWeights.isEmpty {
-                let pairs = sanitizedWeights.map { ($0.key, $0.value) }
-                try speakerEncoder.update(parameters: ModuleParameters.unflattened(pairs), verify: .noUnusedKeys)
-                eval(speakerEncoder.parameters())
-                model.speakerEncoder = speakerEncoder
-                print("Loaded speaker encoder (\(speakerEncoderConfig.encDim)-dim)")
-            } else {
-                print("Warning: speaker_encoder_config present but no speaker_encoder weights found")
-            }
-        }
-
-        print("Loaded Qwen3-TTS model (\(config.ttsModelType))")
         return model
     }
 

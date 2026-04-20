@@ -7,7 +7,6 @@
 
 import Foundation
 @preconcurrency import MLX
-import HuggingFace
 import Tokenizers
 @preconcurrency import MLXLMCommon
 import MLXNN
@@ -861,47 +860,70 @@ public class Qwen3Model: Module, KVCacheDimensionProvider, SpeechGenerationModel
     }
 
     public static func fromPretrained(_ modelRepo: String) async throws -> Qwen3Model {
-        let modelDir = try await ModelResolver.resolve(modelId: modelRepo)
-
-
-        let configPath = modelDir.appendingPathComponent("config.json")
-        let configData = try Data(contentsOf: configPath)
-        let config = try JSONDecoder().decode(Qwen3Configuration.self, from: configData)
-
-        let perLayerQuantization = config.perLayerQuantization
-
-        let model = Qwen3Model(config)
-
-
-        // Load weights from safetensors
-        let weights = try loadWeights(from: modelDir)
-
-        let sanitizedWeights = model.sanitize(weights: weights)
-
-        // Quantize if needed
-
-        if perLayerQuantization != nil {
-            print("Applying quantizaiton from config...")
-
-            if let perLayerQuant = perLayerQuantization {
-                print(" Per-layer: \(perLayerQuant)")
-            }
-
-            quantize(model: model) { path, module in
-                // Only quantize if scales exist for this layer
-                if weights["\(path).scales"] != nil {
-                    return perLayerQuantization?.quantization(layer: path)?.asTuple
-                } else {
-                    return nil
-                }
-            }
+        // Map HuggingFace repo ID → Acervo componentId (variant dispatch)
+        let componentId: String
+        switch modelRepo {
+        case "mlx-community/VyvoTTS-EN-Beta-4bit":
+            componentId = "vyvo-tts-beta-4bit"
+        case "mlx-community/Qwen3-TTS-12Hz-1.7B-Base-bf16":
+            componentId = "qwen3-tts-12hz-1.7b-base-bf16"
+        case "mlx-community/Qwen3-TTS-12Hz-1.7B-VoiceDesign-bf16":
+            componentId = "qwen3-tts-12hz-1.7b-voice-design-bf16"
+        case "mlx-community/Qwen3-TTS-12Hz-1.7B-CustomVoice-bf16":
+            componentId = "qwen3-tts-12hz-1.7b-custom-voice-bf16"
+        default:
+            throw NSError(
+                domain: "MLXAudioTTS.Qwen3",
+                code: 1,
+                userInfo: [
+                    NSLocalizedDescriptionKey:
+                        "Unknown Qwen3 TTS repo '\(modelRepo)'. Register a ComponentDescriptor for it first."
+                ]
+            )
         }
 
+        // Phase 1 — construct model and load weights inside managed-access scope (sync).
+        let (model, modelDir): (Qwen3Model, URL) = try await AudioModelManager.loadWithAcervoStrict(
+            componentId: componentId
+        ) { modelDir in
+            let configPath = modelDir.appendingPathComponent("config.json")
+            let configData = try Data(contentsOf: configPath)
+            let config = try JSONDecoder().decode(Qwen3Configuration.self, from: configData)
 
+            let perLayerQuantization = config.perLayerQuantization
 
-        try model.update(parameters: ModuleParameters.unflattened(sanitizedWeights), verify: [.all])
-        eval(model)
+            let model = Qwen3Model(config)
 
+            // Load weights from safetensors
+            let weights = try loadWeights(from: modelDir)
+
+            let sanitizedWeights = model.sanitize(weights: weights)
+
+            // Quantize if needed
+            if perLayerQuantization != nil {
+                print("Applying quantizaiton from config...")
+
+                if let perLayerQuant = perLayerQuantization {
+                    print(" Per-layer: \(perLayerQuant)")
+                }
+
+                quantize(model: model) { path, module in
+                    // Only quantize if scales exist for this layer
+                    if weights["\(path).scales"] != nil {
+                        return perLayerQuantization?.quantization(layer: path)?.asTuple
+                    } else {
+                        return nil
+                    }
+                }
+            }
+
+            try model.update(parameters: ModuleParameters.unflattened(sanitizedWeights), verify: [.all])
+            eval(model)
+
+            return (model, modelDir)
+        }
+
+        // Phase 2 — async post-load (tokenizer + SNAC) outside managed-access scope.
         try await model.post_load_hook(model: model, modelDir: modelDir)
 
         return model
