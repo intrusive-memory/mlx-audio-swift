@@ -21,7 +21,7 @@ import SwiftAcervo
 ///
 /// Covers both P1 (stable codec models: SNAC, Mimi) and P2 (extended audio codecs and TTS models)
 /// suitable for ComponentDescriptor registration. Dynamic models (user-specified variants) use
-/// HuggingFace discovery via ModelResolver.
+/// HuggingFace discovery (legacy path, now removed).
 public enum AudioModelRepo: String, CaseIterable, Sendable {
   // MARK: - Codecs (P1 — Stable)
 
@@ -632,13 +632,13 @@ private let _registerAudioComponents: Void = {
 /// ## P2 Models (Priority 2: Extended TTS)
 /// - **Models**: VyvoTTS, Orpheus, Soprano, MarvisTTS, PocketTTS
 /// - **Source**: Acervo CDN (if registered) OR HuggingFace (fallback)
-/// - **Loading**: v1 API (`ensureModelReady()`) for Acervo; legacy `ModelResolver.resolve()`
+/// - **Loading**: v1 API (`ensureModelReady()`) for Acervo; direct Acervo CDN download
 /// - **Why**: More flexible, user-specifiable variants, gradual Acervo migration
 /// - **Note**: P2 models are now registered as ComponentDescriptors but haven't removed HF fallback yet
 ///
 /// ## Unknown/Custom Models
-/// - **Source**: HuggingFace only (via `ModelResolver.resolve()`)
-/// - **Loading**: Standard `ModelResolver` API
+/// - **Source**: HuggingFace only (direct download)
+/// - **Loading**: Standard Acervo API
 /// - **Why**: Support user-specified custom models not in registry
 ///
 /// ## Migration Path
@@ -774,7 +774,7 @@ public enum AudioModelManager {
   ///
   /// Entry point for all P1/P2 model load paths in mlx-audio-swift. The component
   /// MUST be present in the Component Registry (registered via `ComponentDescriptor`).
-  /// No HuggingFace fallback, no legacy `ModelResolver` branch.
+  /// No HuggingFace fallback, no legacy HF-discovery branch.
   ///
   /// Flow:
   /// 1. Triggers lazy registration of all audio component descriptors.

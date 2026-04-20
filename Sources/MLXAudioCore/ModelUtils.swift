@@ -1,5 +1,4 @@
 import Foundation
-import HuggingFace
 @preconcurrency import MLX
 
 // MARK: - Float16 Preference for Apple Silicon
@@ -65,53 +64,6 @@ public enum DTypeConfiguration: Sendable {
 // MARK: - ModelUtils
 
 public enum ModelUtils {
-    public static func resolveModelType(repoID: Repo.ID, hfToken: String? = nil) async throws -> String? {
-        let modelNameComponents = repoID.name.split(separator: "/").last?.split(separator: "-")
-        let modelURL = try await resolveOrDownloadModel(repoID: repoID, requiredExtension: "safetensors", hfToken: hfToken)
-        let configJSON = try JSONSerialization.jsonObject(with: Data(contentsOf: modelURL.appendingPathComponent("config.json")))
-        if let config = configJSON as? [String: Any] {
-            return (config["model_type"] as? String) ?? (config["architecture"] as? String) ?? modelNameComponents?.first?.lowercased()
-        }
-        return nil
-    }
-
-    /// Resolves a model from cache or downloads it if not cached.
-    /// - Parameters:
-    ///   - repoID: The repository ID
-    ///   - requiredExtension: File extension that must exist (e.g., "safetensors")
-    ///   - hfToken: The huggingface token for access to gated repositories, if needed.
-    /// - Returns: The model directory URL
-    public static func resolveOrDownloadModel(
-        repoID: Repo.ID,
-        requiredExtension: String,
-        hfToken: String? = nil
-    ) async throws -> URL {
-        try await ModelResolver.resolve(
-            modelId: repoID.description,
-            extensions: ["safetensors", "json", "txt", requiredExtension],
-            hfToken: hfToken
-        )
-    }
-
-    /// Resolves a model from cache or downloads it if not cached.
-    /// - Parameters:
-    ///   - client: The HuggingFace Hub client (ignored — kept for API compatibility)
-    ///   - cache: The HuggingFace cache (ignored — kept for API compatibility)
-    ///   - repoID: The repository ID
-    ///   - requiredExtension: File extension that must exist (e.g., "safetensors")
-    /// - Returns: The model directory URL
-    public static func resolveOrDownloadModel(
-        client: HubClient,
-        cache: HubCache,
-        repoID: Repo.ID,
-        requiredExtension: String
-    ) async throws -> URL {
-        try await ModelResolver.resolve(
-            modelId: repoID.description,
-            extensions: ["safetensors", "json", "txt", requiredExtension],
-            hfToken: ModelResolver.resolveHFToken()
-        )
-    }
 
     // MARK: - Wired Memory Integration
 
