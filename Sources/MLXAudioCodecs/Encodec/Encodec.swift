@@ -398,23 +398,41 @@ public class Encodec: Module {
     // MARK: - Loading
 
     /// Load a pretrained Encodec model from HuggingFace Hub.
+    ///
+    /// Supported repos:
+    /// - `mlx-community/encodec-24khz-float32` → component `encodec-24khz`
+    /// - `mlx-community/encodec-48khz-float32` → component `encodec-48khz`
     public static func fromPretrained(_ pathOrRepo: String) async throws -> Encodec {
-        let modelURL = try await ModelResolver.resolve(modelId: pathOrRepo)
+        let componentId: String
+        switch pathOrRepo {
+        case "mlx-community/encodec-24khz-float32":
+            componentId = "encodec-24khz"
+        case "mlx-community/encodec-48khz-float32":
+            componentId = "encodec-48khz"
+        default:
+            throw NSError(
+                domain: "EncodecModel",
+                code: 1,
+                userInfo: [NSLocalizedDescriptionKey: "Encodec requires a registered repo; got \(pathOrRepo)"]
+            )
+        }
 
-        // Load config
-        let configURL = modelURL.appendingPathComponent("config.json")
-        let configData = try Data(contentsOf: configURL)
-        let config = try JSONDecoder().decode(EncodecConfig.self, from: configData)
+        return try await AudioModelManager.loadWithAcervoStrict(componentId: componentId) { modelURL in
+            // Load config
+            let configURL = modelURL.appendingPathComponent("config.json")
+            let configData = try Data(contentsOf: configURL)
+            let config = try JSONDecoder().decode(EncodecConfig.self, from: configData)
 
-        // Create model
-        let model = Encodec(config: config)
+            // Create model
+            let model = Encodec(config: config)
 
-        // Load weights
-        let weightsURL = modelURL.appendingPathComponent("model.safetensors")
-        let weights = try loadArrays(url: weightsURL)
-        try model.update(parameters: ModuleParameters.unflattened(weights), verify: .noUnusedKeys)
+            // Load weights
+            let weightsURL = modelURL.appendingPathComponent("model.safetensors")
+            let weights = try loadArrays(url: weightsURL)
+            try model.update(parameters: ModuleParameters.unflattened(weights), verify: .noUnusedKeys)
 
-        return model
+            return model
+        }
     }
 }
 

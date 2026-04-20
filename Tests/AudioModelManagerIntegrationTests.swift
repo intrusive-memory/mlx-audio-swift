@@ -353,8 +353,8 @@ struct AudioModelManagerIntegrationTests {
 
     AudioModelManager.ensureComponentsRegistered()
 
-    let snacAvailable = AudioModelManager.isModelAvailable(.snac24kHz)
-    let mimiAvailable = AudioModelManager.isModelAvailable(.mimiPyTorchBF16)
+    let snacAvailable = Acervo.isComponentReady(AudioModelRepo.snac24kHz.componentId)
+    let mimiAvailable = Acervo.isComponentReady(AudioModelRepo.mimiPyTorchBF16.componentId)
 
     print("SNAC availability: \(snacAvailable ? "✓ (cached)" : "✗ (not cached)")")
     print("Mimi availability: \(mimiAvailable ? "✓ (cached)" : "✗ (not cached)")")

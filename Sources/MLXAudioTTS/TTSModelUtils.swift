@@ -1,5 +1,4 @@
 import Foundation
-import HuggingFace
 import MLXAudioCore
 
 public enum TTSModelUtilsError: Error, LocalizedError, CustomStringConvertible {
@@ -25,11 +24,12 @@ public enum TTSModelUtils {
         modelRepo: String,
         hfToken: String? = nil
     ) async throws -> SpeechGenerationModel {
-        guard let repoID = Repo.ID(rawValue: modelRepo) else {
+        guard !modelRepo.isEmpty else {
             throw TTSModelUtilsError.invalidRepositoryID(modelRepo)
         }
 
-        let modelType = try await ModelUtils.resolveModelType(repoID: repoID, hfToken: hfToken)
+        // All models are now resolved via Acervo CDN; infer model type from repo name.
+        let modelType = inferModelType(from: modelRepo)
         return try await loadModel(modelRepo: modelRepo, modelType: modelType)
     }
 

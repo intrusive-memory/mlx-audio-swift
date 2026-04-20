@@ -7,7 +7,6 @@
 
 import Foundation
 @preconcurrency import MLX
-import HuggingFace
 import Tokenizers
 @preconcurrency import MLXLMCommon
 import MLXNN
@@ -354,7 +353,7 @@ private class LlamaTTSModelInner: Module {
 public class LlamaTTSModel: Module, KVCacheDimensionProvider, SpeechGenerationModel, @unchecked Sendable {
     public let vocabularySize: Int
     public let kvHeads: [Int]
-    public var tokenizer: Tokenizer?
+    public var tokenizer: Tokenizers.Tokenizer?
     public var _snacModel: SNAC?
 
     private let model: LlamaTTSModelInner
@@ -911,35 +910,36 @@ public class LlamaTTSModel: Module, KVCacheDimensionProvider, SpeechGenerationMo
     /// - Parameter modelRepo: The model repository ID (e.g., "mlx-community/orpheus-3b-0.1-ft-bf16")
     /// - Returns: The loaded model
     public static func fromPretrained(_ modelRepo: String) async throws -> LlamaTTSModel {
-        let modelDir = try await ModelResolver.resolve(modelId: modelRepo)
+        print("[LlamaTTS] Loading orpheus-tts-3b via Acervo strict API...")
+        let (model, modelDir): (LlamaTTSModel, URL) = try await AudioModelManager.loadWithAcervoStrict(componentId: "orpheus-tts-3b") { modelDir in
+            let configPath = modelDir.appendingPathComponent("config.json")
+            let configData = try Data(contentsOf: configPath)
+            let config = try JSONDecoder().decode(LlamaTTSConfiguration.self, from: configData)
 
-        let configPath = modelDir.appendingPathComponent("config.json")
-        let configData = try Data(contentsOf: configPath)
-        let config = try JSONDecoder().decode(LlamaTTSConfiguration.self, from: configData)
+            let perLayerQuantization = config.perLayerQuantization
 
-        let perLayerQuantization = config.perLayerQuantization
+            let model = LlamaTTSModel(config)
 
-        let model = LlamaTTSModel(config)
+            let weights = try llamaTTSLoadWeights(from: modelDir)
+            let sanitizedWeights = model.sanitize(weights: weights)
 
-        // Load weights from safetensors
-        let weights = try llamaTTSLoadWeights(from: modelDir)
-        let sanitizedWeights = model.sanitize(weights: weights)
+            if perLayerQuantization != nil {
+                print("Applying quantization from config...")
 
-        // Quantize if needed
-        if perLayerQuantization != nil {
-            print("Applying quantization from config...")
-
-            quantize(model: model) { path, module in
-                if weights["\(path).scales"] != nil {
-                    return perLayerQuantization?.quantization(layer: path)?.asTuple
-                } else {
-                    return nil
+                quantize(model: model) { path, module in
+                    if weights["\(path).scales"] != nil {
+                        return perLayerQuantization?.quantization(layer: path)?.asTuple
+                    } else {
+                        return nil
+                    }
                 }
             }
-        }
 
-        try model.update(parameters: ModuleParameters.unflattened(sanitizedWeights), verify: [.all])
-        eval(model)
+            try model.update(parameters: ModuleParameters.unflattened(sanitizedWeights), verify: [.all])
+            eval(model)
+
+            return (model, modelDir)
+        }
 
         try await model.post_load_hook(model: model, modelDir: modelDir)
 

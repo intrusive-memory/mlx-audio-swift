@@ -1,6 +1,4 @@
 import Foundation
-import Hub
-import HuggingFace
 @preconcurrency import MLX
 import MLXAudioCore
 import MLXLMCommon
@@ -340,27 +338,29 @@ public final class PocketTTSModel: Module, SpeechGenerationModel, @unchecked Sen
     // MARK: - Loading
 
     public static func fromPretrained(_ modelRepo: String) async throws -> PocketTTSModel {
-        let modelDir = try await ModelResolver.resolve(modelId: modelRepo)
-        let configURL = modelDir.appendingPathComponent("config.json")
-        let config = try PocketTTSModelConfig.load(from: configURL)
+        return try await AudioModelManager.loadWithAcervoStrict(componentId: "pocket-tts") { modelDir in
+            let configURL = modelDir.appendingPathComponent("config.json")
+            let config = try PocketTTSModelConfig.load(from: configURL)
 
-        let model = try await PocketTTSModel.fromConfig(config, modelFolder: modelDir)
-        let weights = try await loadPocketTTSWeights(modelDir: modelDir)
-        try model.update(parameters: ModuleParameters.unflattened(weights), verify: [.all])
+            let weightsURL = modelDir.appendingPathComponent("model.safetensors")
+            guard FileManager.default.fileExists(atPath: weightsURL.path) else {
+                throw NSError(
+                    domain: "PocketTTSModel",
+                    code: 2,
+                    userInfo: [NSLocalizedDescriptionKey: "model.safetensors not found at \(weightsURL.path)"]
+                )
+            }
+            let weights = try MLX.loadArrays(url: weightsURL)
 
-        eval(model)
-        return model
+            let model = PocketTTSModel(
+                config: config,
+                modelFolder: modelDir,
+                flowLM: try FlowLMModel.fromConfigSync(config.flowLM, latentDim: config.mimi.quantizer.dimension, modelFolder: modelDir),
+                mimi: MimiAdapter.fromConfig(config.mimi)
+            )
+            try model.update(parameters: ModuleParameters.unflattened(weights), verify: [.all])
+            eval(model)
+            return model
+        }
     }
-}
-
-private func loadPocketTTSWeights(modelDir: URL) async throws -> [String: MLXArray] {
-    let weightsURL = modelDir.appendingPathComponent("model.safetensors")
-    if !FileManager.default.fileExists(atPath: weightsURL.path) {
-        throw NSError(
-            domain: "PocketTTSModel",
-            code: 2,
-            userInfo: [NSLocalizedDescriptionKey: "model.safetensors not found at \(weightsURL.path)"]
-        )
-    }
-    return try MLX.loadArrays(url: weightsURL)
 }

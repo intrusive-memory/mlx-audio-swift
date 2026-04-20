@@ -9,8 +9,6 @@ import Foundation
 import MLX
 import MLXNN
 import MLXAudioCore
-import MLXLMCommon
-import HuggingFace
 import Tokenizers
 
 // MARK: - Force Align Result Types
@@ -526,64 +524,57 @@ public class Qwen3ForcedAlignerModel: Module {
     // MARK: - Model Loading
 
     public static func fromPretrained(_ modelPath: String) async throws -> Qwen3ForcedAlignerModel {
-        let hfToken: String? = ProcessInfo.processInfo.environment["HF_TOKEN"]
-            ?? Bundle.main.object(forInfoDictionaryKey: "HF_TOKEN") as? String
+        // Phase 1 — construct model and load weights inside managed-access scope.
+        // ForcedAligner reuses the same model directory as Qwen3ASR (componentId: "qwen3-asr").
+        // `generateTokenizerJSONIfMissing` is a sync filesystem operation; safe inside the closure.
+        let (model, modelDir): (Qwen3ForcedAlignerModel, URL) = try await AudioModelManager.loadWithAcervoStrict(
+            componentId: "qwen3-asr"
+        ) { modelDir in
+            // Load config
+            let configPath = modelDir.appendingPathComponent("config.json")
+            let configData = try Data(contentsOf: configPath)
+            let config = try JSONDecoder().decode(Qwen3ASRConfig.self, from: configData)
 
-        guard let repoID = Repo.ID(rawValue: modelPath) else {
-            throw NSError(
-                domain: "Qwen3ForcedAlignerModel",
-                code: 1,
-                userInfo: [NSLocalizedDescriptionKey: "Invalid repository ID: \(modelPath)"]
-            )
-        }
+            let perLayerQuantization = config.perLayerQuantization
 
-        let modelDir = try await ModelUtils.resolveOrDownloadModel(
-            repoID: repoID,
-            requiredExtension: "safetensors",
-            hfToken: hfToken
-        )
+            let model = Qwen3ForcedAlignerModel(config)
 
-        // Load config
-        let configPath = modelDir.appendingPathComponent("config.json")
-        let configData = try Data(contentsOf: configPath)
-        let config = try JSONDecoder().decode(Qwen3ASRConfig.self, from: configData)
+            // Generate tokenizer.json if missing (Qwen3 ASR models don't ship it).
+            try Qwen3ASRModel.generateTokenizerJSONIfMissing(in: modelDir)
 
-        let perLayerQuantization = config.perLayerQuantization
+            var weights: [String: MLXArray] = [:]
+            let fileManager = FileManager.default
+            let files = try fileManager.contentsOfDirectory(at: modelDir, includingPropertiesForKeys: nil)
+            let safetensorFiles = files.filter { $0.pathExtension == "safetensors" }
 
-        let model = Qwen3ForcedAlignerModel(config)
+            for file in safetensorFiles {
+                let fileWeights = try MLX.loadArrays(url: file)
+                weights.merge(fileWeights) { _, new in new }
+            }
 
+            let sanitizedWeights = Qwen3ForcedAlignerModel.sanitize(weights: weights)
 
-        try Qwen3ASRModel.generateTokenizerJSONIfMissing(in: modelDir)
-
-
-        model.tokenizer = try await AutoTokenizer.from(modelFolder: modelDir)
-
-        var weights: [String: MLXArray] = [:]
-        let fileManager = FileManager.default
-        let files = try fileManager.contentsOfDirectory(at: modelDir, includingPropertiesForKeys: nil)
-        let safetensorFiles = files.filter { $0.pathExtension == "safetensors" }
-
-        for file in safetensorFiles {
-            let fileWeights = try MLX.loadArrays(url: file)
-            weights.merge(fileWeights) { _, new in new }
-        }
-
-        let sanitizedWeights = Qwen3ForcedAlignerModel.sanitize(weights: weights)
-
-        if perLayerQuantization != nil {
-            quantize(model: model) { path, module in
-                if path.hasPrefix("audio_tower") {
+            if perLayerQuantization != nil {
+                quantize(model: model) { path, module in
+                    if path.hasPrefix("audio_tower") {
+                        return nil
+                    }
+                    if sanitizedWeights["\(path).scales"] != nil {
+                        return perLayerQuantization?.quantization(layer: path)?.asTuple
+                    }
                     return nil
                 }
-                if sanitizedWeights["\(path).scales"] != nil {
-                    return perLayerQuantization?.quantization(layer: path)?.asTuple
-                }
-                return nil
             }
+
+            try model.update(parameters: ModuleParameters.unflattened(sanitizedWeights), verify: [.all])
+            eval(model)
+
+            return (model, modelDir)
         }
 
-        try model.update(parameters: ModuleParameters.unflattened(sanitizedWeights), verify: [.all])
-        eval(model)
+        // Phase 2 — load tokenizer async outside managed-access scope.
+        // Tokenizer files are read-only on disk post-verification; this is safe.
+        model.tokenizer = try await AutoTokenizer.from(modelFolder: modelDir)
 
         return model
     }

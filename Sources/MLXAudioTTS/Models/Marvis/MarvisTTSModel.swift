@@ -1,6 +1,4 @@
 import Foundation
-import Hub
-import HuggingFace
 @preconcurrency import MLX
 import MLXAudioCodecs
 import MLXAudioCore
@@ -25,7 +23,7 @@ public final class MarvisTTSModel: Module {
     
     private let model: CSMModel
     private let _promptURLs: [URL]?
-    private let _textTokenizer: Tokenizer
+    private let _textTokenizer: Tokenizers.Tokenizer
     private let _audio_tokenizer: MimiTokenizer
     private let _streamingDecoder: MimiStreamingDecoder
     
@@ -33,7 +31,7 @@ public final class MarvisTTSModel: Module {
         config: CSMModelArgs,
         repoId: String,
         promptURLs: [URL]? = nil,
-        textTokenizer: Tokenizer,
+        textTokenizer: Tokenizers.Tokenizer,
         audioTokenizer: MimiTokenizer
     ) {
         _ = repoId
@@ -50,12 +48,19 @@ public final class MarvisTTSModel: Module {
 
     public convenience init(
         config: CSMModelArgs,
-        hub: HubApi = .shared,
         repoId: String,
         promptURLs: [URL]? = nil,
         progressHandler: @escaping (Progress) -> Void
     ) async throws {
-        let textTokenizer = try await loadTokenizer(configuration: ModelConfiguration(id: repoId), hub: hub)
+        // Resolve the model directory through Acervo (download + integrity-verify as
+        // needed) and load the tokenizer from the on-disk directory per
+        // swift-transformers 1.3.0 API.
+        let modelDirectoryURL = try await AudioModelManager.loadWithAcervoStrict(
+            componentId: "marvis-tts-250m-8bit"
+        ) { modelDir in
+            modelDir
+        }
+        let textTokenizer = try await AutoTokenizer.from(modelFolder: modelDirectoryURL)
         let codec = try await Mimi.fromPretrained(progressHandler: progressHandler)
         let audioTokenizer = MimiTokenizer(codec)
         self.init(
@@ -153,40 +158,40 @@ public extension MarvisTTSModel {
         progressHandler: @escaping (Progress) -> Void = { _ in }
     ) async throws -> MarvisTTSModel {
         Memory.cacheLimit = 100 * 1024 * 1024
+        print("[MarvisTTS] Loading marvis-tts-250m-8bit via Acervo strict API...")
 
-        let hfToken: String? = ProcessInfo.processInfo.environment["HF_TOKEN"]
-            ?? Bundle.main.object(forInfoDictionaryKey: "HF_TOKEN") as? String
+        // Step 1: Resolve model directory via Acervo and load sync-loadable assets
+        // (config, audio prompt URLs, weights) inside the managed-access closure.
+        let (args, audioPromptURLs, weights, modelDirectoryURL) = try await AudioModelManager.loadWithAcervoStrict(
+            componentId: "marvis-tts-250m-8bit"
+        ) { modelDir in
+            let configFileURL = modelDir.appendingPathComponent("config.json")
+            let args = try JSONDecoder().decode(CSMModelArgs.self, from: Data(contentsOf: configFileURL))
 
-        guard let repoID = Repo.ID(rawValue: modelRepo) else {
-            throw NSError(
-                domain: "MarvisTTSModel",
-                code: 1,
-                userInfo: [NSLocalizedDescriptionKey: "Invalid repository ID: \(modelRepo)"]
-            )
-        }
-
-        let modelDirectoryURL = try await ModelUtils.resolveOrDownloadModel(
-            repoID: repoID,
-            requiredExtension: "safetensors",
-            hfToken: hfToken
-        )
-
-        let promptFileURLs = modelDirectoryURL.appendingPathComponent("prompts", isDirectory: true)
-        var audioPromptURLs = [URL]()
-        if FileManager.default.fileExists(atPath: promptFileURLs.path) {
-            for promptURL in try FileManager.default.contentsOfDirectory(at: promptFileURLs, includingPropertiesForKeys: nil) {
-                if promptURL.pathExtension == "wav" {
-                    audioPromptURLs.append(promptURL)
+            let promptDirURL = modelDir.appendingPathComponent("prompts", isDirectory: true)
+            var audioPromptURLs = [URL]()
+            if FileManager.default.fileExists(atPath: promptDirURL.path) {
+                for promptURL in try FileManager.default.contentsOfDirectory(
+                    at: promptDirURL, includingPropertiesForKeys: nil
+                ) {
+                    if promptURL.pathExtension == "wav" {
+                        audioPromptURLs.append(promptURL)
+                    }
                 }
             }
+
+            let weights = try marvisLoadWeights(from: modelDir)
+            return (args, audioPromptURLs, weights, modelDir)
         }
 
-        let configFileURL = modelDirectoryURL.appendingPathComponent("config.json")
-        let args = try JSONDecoder().decode(CSMModelArgs.self, from: Data(contentsOf: configFileURL))
-
+        // Step 2: Load async dependencies (tokenizer + audio codec).
+        // Tokenizer is loaded from the on-disk model directory per
+        // swift-transformers 1.3.0 API (`AutoTokenizer.from(modelFolder:)`).
         let textTokenizer = try await AutoTokenizer.from(modelFolder: modelDirectoryURL)
         let codec = try await Mimi.fromPretrained(progressHandler: progressHandler)
         let audioTokenizer = MimiTokenizer(codec)
+
+        // Step 3: Construct model with all resolved components.
         let model = MarvisTTSModel(
             config: args,
             repoId: modelRepo,
@@ -195,34 +200,31 @@ public extension MarvisTTSModel {
             audioTokenizer: audioTokenizer
         )
 
-        var weights = try marvisLoadWeights(from: modelDirectoryURL)
-        
+        // Step 4: Apply weights with optional quantization.
+        var mutableWeights = weights
         if let quantization = args.quantization,
            let groupSize = quantization["group_size"],
            let bits = quantization["bits"] {
             if case let .number(g) = groupSize, case let .number(b) = bits {
                 quantize(model: model, groupSize: Int(g), bits: Int(b)) { path, _ in
-                    weights["\(path).scales"] != nil
+                    mutableWeights["\(path).scales"] != nil
                 }
             }
-            
         } else {
-            weights = sanitize(weights: weights)
+            mutableWeights = sanitize(weights: mutableWeights)
         }
-        
-        let parameters = ModuleParameters.unflattened(weights)
+
+        let parameters = ModuleParameters.unflattened(mutableWeights)
         try model.update(parameters: parameters, verify: [.all])
-        
+
         eval(model)
         return model
     }
 
     static func fromPretrained(
-        hub: HubApi = .shared,
         repoId: String = "Marvis-AI/marvis-tts-250m-v0.2-MLX-8bit",
         progressHandler: @escaping (Progress) -> Void
     ) async throws -> MarvisTTSModel {
-        _ = hub
         return try await fromPretrained(repoId, progressHandler: progressHandler)
     }
     

@@ -21,7 +21,7 @@ import SwiftAcervo
 ///
 /// Covers both P1 (stable codec models: SNAC, Mimi) and P2 (extended audio codecs and TTS models)
 /// suitable for ComponentDescriptor registration. Dynamic models (user-specified variants) use
-/// HuggingFace discovery via ModelResolver.
+/// HuggingFace discovery (legacy path, now removed).
 public enum AudioModelRepo: String, CaseIterable, Sendable {
   // MARK: - Codecs (P1 — Stable)
 
@@ -57,6 +57,47 @@ public enum AudioModelRepo: String, CaseIterable, Sendable {
   /// Compact TTS model for on-device synthesis.
   case pocketTTS = "mlx-community/pocket-tts"
 
+  /// Qwen3-TTS 12Hz 1.7B Base (bfloat16).
+  /// Base conditional generation model supporting x-vector speaker embedding
+  /// (from reference audio) and in-context voice cloning (ICL). Ships the
+  /// ECAPA-TDNN speaker encoder.
+  case qwen3TTS12Hz1_7BBaseBF16 = "mlx-community/Qwen3-TTS-12Hz-1.7B-Base-bf16"
+
+  /// Qwen3-TTS 12Hz 1.7B VoiceDesign (bfloat16).
+  /// Text-described voice generation (instruct-style prompt); no speaker encoder.
+  case qwen3TTS12Hz1_7BVoiceDesignBF16 = "mlx-community/Qwen3-TTS-12Hz-1.7B-VoiceDesign-bf16"
+
+  /// Qwen3-TTS 12Hz 1.7B CustomVoice (bfloat16).
+  /// Predefined named-speaker generation; no speaker encoder.
+  case qwen3TTS12Hz1_7BCustomVoiceBF16 = "mlx-community/Qwen3-TTS-12Hz-1.7B-CustomVoice-bf16"
+
+  // MARK: - Audio Codecs (P2 — Extended)
+
+  /// DAC VAE (watermarked) neural audio codec — MLX port of Facebook's DACVAE.
+  /// Continuous-latent VAE-style codec with embedded watermarking support.
+  /// Used by: SAM-Audio and generative models requiring continuous latent representations.
+  case dacVAEWatermarked = "mlx-community/dacvae-watermarked"
+
+  /// Encodec 24 kHz (float32) neural audio codec — Meta's EnCodec at 24 kHz.
+  /// Used by: Vocos vocoder (`encodec_24khz` variant) as the underlying codec backend.
+  case encodec24kHz = "mlx-community/encodec-24khz-float32"
+
+  /// Encodec 48 kHz (float32) neural audio codec — Meta's EnCodec at 48 kHz.
+  /// Used by: Vocos vocoder (`encodec_48khz` variant) as the underlying codec backend.
+  case encodec48kHz = "mlx-community/encodec-48khz-float32"
+
+  // MARK: - ASR Models (P2 — Extended)
+
+  /// GLM-ASR Nano (4-bit quantized) automatic speech recognition model.
+  /// Compact, quantized speech-to-text model based on the GLM architecture.
+  /// Used by: MLXAudioSTT for on-device transcription.
+  case glmASRNano2512_4bit = "mlx-community/GLM-ASR-Nano-2512-4bit"
+
+  /// Qwen3 ASR 0.6B (4-bit quantized) automatic speech recognition model.
+  /// Compact, quantized speech-to-text model based on the Qwen3 architecture.
+  /// Used by: MLXAudioSTT for on-device transcription.
+  case qwen3ASR_0_6B_4bit = "mlx-community/Qwen3-ASR-0.6B-4bit"
+
   /// Human-readable display name for the model variant.
   public var displayName: String {
     switch self {
@@ -74,6 +115,22 @@ public enum AudioModelRepo: String, CaseIterable, Sendable {
       return "MarvisTTS (250M, 8-bit)"
     case .pocketTTS:
       return "PocketTTS (Multi-voice)"
+    case .qwen3TTS12Hz1_7BBaseBF16:
+      return "Qwen3-TTS 12Hz 1.7B Base (BF16)"
+    case .qwen3TTS12Hz1_7BVoiceDesignBF16:
+      return "Qwen3-TTS 12Hz 1.7B VoiceDesign (BF16)"
+    case .qwen3TTS12Hz1_7BCustomVoiceBF16:
+      return "Qwen3-TTS 12Hz 1.7B CustomVoice (BF16)"
+    case .dacVAEWatermarked:
+      return "DAC VAE Audio Codec"
+    case .encodec24kHz:
+      return "Encodec 24 kHz Audio Codec (float32)"
+    case .encodec48kHz:
+      return "Encodec 48 kHz Audio Codec (float32)"
+    case .glmASRNano2512_4bit:
+      return "GLM-ASR Nano (4-bit)"
+    case .qwen3ASR_0_6B_4bit:
+      return "Qwen3 ASR 0.6B (4-bit)"
     }
   }
 
@@ -97,6 +154,22 @@ public enum AudioModelRepo: String, CaseIterable, Sendable {
       return "marvis-tts-250m-8bit"
     case .pocketTTS:
       return "pocket-tts"
+    case .qwen3TTS12Hz1_7BBaseBF16:
+      return "qwen3-tts-12hz-1.7b-base-bf16"
+    case .qwen3TTS12Hz1_7BVoiceDesignBF16:
+      return "qwen3-tts-12hz-1.7b-voice-design-bf16"
+    case .qwen3TTS12Hz1_7BCustomVoiceBF16:
+      return "qwen3-tts-12hz-1.7b-custom-voice-bf16"
+    case .dacVAEWatermarked:
+      return "dac-vae"
+    case .encodec24kHz:
+      return "encodec-24khz"
+    case .encodec48kHz:
+      return "encodec-48khz"
+    case .glmASRNano2512_4bit:
+      return "glm-asr"
+    case .qwen3ASR_0_6B_4bit:
+      return "qwen3-asr"
     }
   }
 
@@ -106,10 +179,16 @@ public enum AudioModelRepo: String, CaseIterable, Sendable {
   /// TTS models are language models (autoregressive generative models).
   public var componentType: ComponentType {
     switch self {
-    case .snac24kHz, .mimiPyTorchBF16:
+    case .snac24kHz, .mimiPyTorchBF16, .dacVAEWatermarked, .encodec24kHz, .encodec48kHz:
       return .decoder
-    case .vyvoTTSBeta4bit, .orpheusTTS, .sopranoTTS, .marvisTTS, .pocketTTS:
+    case .vyvoTTSBeta4bit, .orpheusTTS, .sopranoTTS, .marvisTTS, .pocketTTS,
+         .qwen3TTS12Hz1_7BBaseBF16, .qwen3TTS12Hz1_7BVoiceDesignBF16,
+         .qwen3TTS12Hz1_7BCustomVoiceBF16:
       return .languageModel
+    case .glmASRNano2512_4bit:
+      return .encoder
+    case .qwen3ASR_0_6B_4bit:
+      return .encoder
     }
   }
 }
@@ -130,6 +209,52 @@ private let snac24kHzRequiredFiles: [ComponentFile] = [
 /// Single-file model: only the tokenizer checkpoint is required.
 private let mimiPyTorchBF16RequiredFiles: [ComponentFile] = [
   ComponentFile(relativePath: "tokenizer-e351c8d8-checkpoint125.safetensors"),
+]
+
+/// Required files for the DAC VAE (Watermarked) model variant.
+///
+/// Continuous-latent VAE codec: config plus weight file.
+private let dacVAEWatermarkedRequiredFiles: [ComponentFile] = [
+  ComponentFile(relativePath: "config.json"),
+  ComponentFile(relativePath: "model.safetensors"),
+]
+
+/// Required files shared by all Encodec model variants (24 kHz and 48 kHz).
+///
+/// Both repos ship the same three-file layout: config, weight file, and sharded-weight index.
+private let encodecRequiredFiles: [ComponentFile] = [
+  ComponentFile(relativePath: "config.json"),
+  ComponentFile(relativePath: "model.safetensors"),
+  ComponentFile(relativePath: "model.safetensors.index.json"),
+]
+
+// MARK: - P2 ASR Model Files
+
+/// Required files for the GLM-ASR Nano (4-bit quantized) model.
+///
+/// Swift-runtime files only; Python reference scripts shipped in the repo are excluded.
+private let glmASRNano2512_4bitRequiredFiles: [ComponentFile] = [
+  ComponentFile(relativePath: "config.json"),
+  ComponentFile(relativePath: "model.safetensors"),
+  ComponentFile(relativePath: "model.safetensors.index.json"),
+  ComponentFile(relativePath: "tokenizer.json"),
+  ComponentFile(relativePath: "tokenizer_config.json"),
+]
+
+/// Required files for the Qwen3 ASR 0.6B (4-bit quantized) model.
+///
+/// tokenizer.json is NOT listed; the Swift loader auto-generates it at runtime
+/// from vocab.json + merges.txt when missing.
+private let qwen3ASR_0_6B_4bitRequiredFiles: [ComponentFile] = [
+  ComponentFile(relativePath: "config.json"),
+  ComponentFile(relativePath: "model.safetensors"),
+  ComponentFile(relativePath: "model.safetensors.index.json"),
+  ComponentFile(relativePath: "chat_template.json"),
+  ComponentFile(relativePath: "generation_config.json"),
+  ComponentFile(relativePath: "merges.txt"),
+  ComponentFile(relativePath: "preprocessor_config.json"),
+  ComponentFile(relativePath: "tokenizer_config.json"),
+  ComponentFile(relativePath: "vocab.json"),
 ]
 
 // MARK: - P2 TTS Model Files
@@ -178,6 +303,48 @@ private let pocketTTSRequiredFiles: [ComponentFile] = [
   ComponentFile(relativePath: "tokenizer.json"),
 ]
 
+// MARK: - Qwen3-TTS 12Hz 1.7B Variants (Base / VoiceDesign / CustomVoice)
+//
+// These three repos share a file layout:
+//   - Top-level: config.json, vocab.json, merges.txt, tokenizer_config.json, model.safetensors
+//   - speech_tokenizer/: config.json, model.safetensors
+// tokenizer.json is NOT shipped; Qwen3TTSModel.fromPretrained generates it on first load
+// from vocab.json + merges.txt + tokenizer_config.json.
+// Speaker encoder weights (Base variant only) are bundled inside the top-level model.safetensors.
+
+/// Required files for Qwen3-TTS 12Hz 1.7B Base (bfloat16).
+private let qwen3TTS12Hz1_7BBaseBF16RequiredFiles: [ComponentFile] = [
+  ComponentFile(relativePath: "config.json"),
+  ComponentFile(relativePath: "vocab.json"),
+  ComponentFile(relativePath: "merges.txt"),
+  ComponentFile(relativePath: "tokenizer_config.json"),
+  ComponentFile(relativePath: "model.safetensors"),
+  ComponentFile(relativePath: "speech_tokenizer/config.json"),
+  ComponentFile(relativePath: "speech_tokenizer/model.safetensors"),
+]
+
+/// Required files for Qwen3-TTS 12Hz 1.7B VoiceDesign (bfloat16).
+private let qwen3TTS12Hz1_7BVoiceDesignBF16RequiredFiles: [ComponentFile] = [
+  ComponentFile(relativePath: "config.json"),
+  ComponentFile(relativePath: "vocab.json"),
+  ComponentFile(relativePath: "merges.txt"),
+  ComponentFile(relativePath: "tokenizer_config.json"),
+  ComponentFile(relativePath: "model.safetensors"),
+  ComponentFile(relativePath: "speech_tokenizer/config.json"),
+  ComponentFile(relativePath: "speech_tokenizer/model.safetensors"),
+]
+
+/// Required files for Qwen3-TTS 12Hz 1.7B CustomVoice (bfloat16).
+private let qwen3TTS12Hz1_7BCustomVoiceBF16RequiredFiles: [ComponentFile] = [
+  ComponentFile(relativePath: "config.json"),
+  ComponentFile(relativePath: "vocab.json"),
+  ComponentFile(relativePath: "merges.txt"),
+  ComponentFile(relativePath: "tokenizer_config.json"),
+  ComponentFile(relativePath: "model.safetensors"),
+  ComponentFile(relativePath: "speech_tokenizer/config.json"),
+  ComponentFile(relativePath: "speech_tokenizer/model.safetensors"),
+]
+
 /// All audio model component descriptors (P1 + P2).
 ///
 /// P1 models: Stable codec models (SNAC, Mimi) hard-coded in applications.
@@ -217,6 +384,79 @@ private let audioComponentDescriptors: [ComponentDescriptor] = [
       "numCodebooks": "32",
       "modelType": "codec",
       "stage": "P1",
+    ]
+  ),
+  ComponentDescriptor(
+    id: AudioModelRepo.dacVAEWatermarked.componentId,
+    type: .decoder,
+    displayName: "DAC VAE Audio Codec",
+    repoId: AudioModelRepo.dacVAEWatermarked.rawValue,
+    files: dacVAEWatermarkedRequiredFiles,
+    estimatedSizeBytes: 200_000_000,
+    minimumMemoryBytes: 500_000_000,
+    metadata: [
+      "modelType": "codec",
+      "stage": "P2",
+    ]
+  ),
+  ComponentDescriptor(
+    id: AudioModelRepo.encodec24kHz.componentId,
+    type: .decoder,
+    displayName: "Encodec 24 kHz Audio Codec (float32)",
+    repoId: AudioModelRepo.encodec24kHz.rawValue,
+    files: encodecRequiredFiles,
+    estimatedSizeBytes: 80_000_000,
+    minimumMemoryBytes: 200_000_000,
+    metadata: [
+      "modelType": "codec",
+      "sampleRate": "24000",
+      "stage": "P2",
+    ]
+  ),
+  ComponentDescriptor(
+    id: AudioModelRepo.encodec48kHz.componentId,
+    type: .decoder,
+    displayName: "Encodec 48 kHz Audio Codec (float32)",
+    repoId: AudioModelRepo.encodec48kHz.rawValue,
+    files: encodecRequiredFiles,
+    estimatedSizeBytes: 80_000_000,
+    minimumMemoryBytes: 200_000_000,
+    metadata: [
+      "modelType": "codec",
+      "sampleRate": "48000",
+      "stage": "P2",
+    ]
+  ),
+
+  // MARK: - P2 ASR Models (Extended)
+
+  ComponentDescriptor(
+    id: AudioModelRepo.glmASRNano2512_4bit.componentId,
+    type: .encoder,
+    displayName: "GLM-ASR Nano (4-bit)",
+    repoId: AudioModelRepo.glmASRNano2512_4bit.rawValue,
+    files: glmASRNano2512_4bitRequiredFiles,
+    estimatedSizeBytes: 600_000_000,
+    minimumMemoryBytes: 1_200_000_000,
+    metadata: [
+      "modelType": "asr",
+      "quantization": "4-bit",
+      "stage": "P2",
+    ]
+  ),
+  ComponentDescriptor(
+    id: AudioModelRepo.qwen3ASR_0_6B_4bit.componentId,
+    type: .encoder,
+    displayName: "Qwen3 ASR 0.6B (4-bit)",
+    repoId: AudioModelRepo.qwen3ASR_0_6B_4bit.rawValue,
+    files: qwen3ASR_0_6B_4bitRequiredFiles,
+    estimatedSizeBytes: 700_000_000,
+    minimumMemoryBytes: 1_500_000_000,
+    metadata: [
+      "modelType": "asr",
+      "params": "0.6B",
+      "quantization": "4-bit",
+      "stage": "P2",
     ]
   ),
 
@@ -302,6 +542,69 @@ private let audioComponentDescriptors: [ComponentDescriptor] = [
       "stage": "P2",
     ]
   ),
+
+  // MARK: - Qwen3-TTS 12Hz 1.7B Variants (Base / VoiceDesign / CustomVoice)
+
+  ComponentDescriptor(
+    id: AudioModelRepo.qwen3TTS12Hz1_7BBaseBF16.componentId,
+    type: .languageModel,
+    displayName: "Qwen3-TTS 12Hz 1.7B Base (BF16)",
+    repoId: AudioModelRepo.qwen3TTS12Hz1_7BBaseBF16.rawValue,
+    files: qwen3TTS12Hz1_7BBaseBF16RequiredFiles,
+    estimatedSizeBytes: 3_500_000_000,
+    minimumMemoryBytes: 6_000_000_000,
+    metadata: [
+      "sampleRate": "24000",
+      "codecFrameRate": "12",
+      "params": "1.7B",
+      "dtype": "bfloat16",
+      "ttsModelType": "base",
+      "voiceSource": "x-vector-from-ref-audio",
+      "hasSpeakerEncoder": "true",
+      "modelType": "tts",
+      "stage": "P2",
+    ]
+  ),
+  ComponentDescriptor(
+    id: AudioModelRepo.qwen3TTS12Hz1_7BVoiceDesignBF16.componentId,
+    type: .languageModel,
+    displayName: "Qwen3-TTS 12Hz 1.7B VoiceDesign (BF16)",
+    repoId: AudioModelRepo.qwen3TTS12Hz1_7BVoiceDesignBF16.rawValue,
+    files: qwen3TTS12Hz1_7BVoiceDesignBF16RequiredFiles,
+    estimatedSizeBytes: 3_500_000_000,
+    minimumMemoryBytes: 6_000_000_000,
+    metadata: [
+      "sampleRate": "24000",
+      "codecFrameRate": "12",
+      "params": "1.7B",
+      "dtype": "bfloat16",
+      "ttsModelType": "voice_design",
+      "voiceSource": "text-description",
+      "hasSpeakerEncoder": "false",
+      "modelType": "tts",
+      "stage": "P2",
+    ]
+  ),
+  ComponentDescriptor(
+    id: AudioModelRepo.qwen3TTS12Hz1_7BCustomVoiceBF16.componentId,
+    type: .languageModel,
+    displayName: "Qwen3-TTS 12Hz 1.7B CustomVoice (BF16)",
+    repoId: AudioModelRepo.qwen3TTS12Hz1_7BCustomVoiceBF16.rawValue,
+    files: qwen3TTS12Hz1_7BCustomVoiceBF16RequiredFiles,
+    estimatedSizeBytes: 3_500_000_000,
+    minimumMemoryBytes: 6_000_000_000,
+    metadata: [
+      "sampleRate": "24000",
+      "codecFrameRate": "12",
+      "params": "1.7B",
+      "dtype": "bfloat16",
+      "ttsModelType": "custom_voice",
+      "voiceSource": "predefined-named-speakers",
+      "hasSpeakerEncoder": "false",
+      "modelType": "tts",
+      "stage": "P2",
+    ]
+  ),
 ]
 
 /// Module-level registration trigger.
@@ -329,13 +632,13 @@ private let _registerAudioComponents: Void = {
 /// ## P2 Models (Priority 2: Extended TTS)
 /// - **Models**: VyvoTTS, Orpheus, Soprano, MarvisTTS, PocketTTS
 /// - **Source**: Acervo CDN (if registered) OR HuggingFace (fallback)
-/// - **Loading**: v1 API (`ensureModelReady()`) for Acervo; legacy `ModelResolver.resolve()`
+/// - **Loading**: v1 API (`ensureModelReady()`) for Acervo; direct Acervo CDN download
 /// - **Why**: More flexible, user-specifiable variants, gradual Acervo migration
 /// - **Note**: P2 models are now registered as ComponentDescriptors but haven't removed HF fallback yet
 ///
 /// ## Unknown/Custom Models
-/// - **Source**: HuggingFace only (via `ModelResolver.resolve()`)
-/// - **Loading**: Standard `ModelResolver` API
+/// - **Source**: HuggingFace only (direct download)
+/// - **Loading**: Standard Acervo API
 /// - **Why**: Support user-specified custom models not in registry
 ///
 /// ## Migration Path
@@ -378,14 +681,6 @@ public enum AudioModelManager {
     AudioModelRepo.allCases.first { $0.rawValue == modelId }
   }
 
-  /// Get the component ID for a registered model by its HuggingFace repo ID.
-  ///
-  /// - Parameter modelId: HuggingFace repo ID (e.g., `"mlx-community/snac_24khz"`)
-  /// - Returns: The Acervo component ID, or `nil` if not registered.
-  public static func componentId(for modelId: String) -> String? {
-    repo(for: modelId)?.componentId
-  }
-
   /// Ensure a specific audio model component is ready for use.
   ///
   /// Downloads missing files from HuggingFace via SwiftAcervo if needed.
@@ -407,14 +702,6 @@ public enum AudioModelManager {
       modelRepo.componentId,
       progress: progress
     )
-  }
-
-  /// Check whether a model is available in Acervo's shared directory.
-  ///
-  /// - Parameter modelRepo: The audio model variant to check.
-  /// - Returns: `true` if model is cached locally, `false` otherwise.
-  public static func isModelAvailable(_ modelRepo: AudioModelRepo) -> Bool {
-    Acervo.isModelAvailable(modelRepo.rawValue)
   }
 
   /// Get the local directory path for a model if it's cached.
@@ -473,6 +760,77 @@ public enum AudioModelManager {
     let modelDir = try Acervo.modelDirectory(for: modelRepo.rawValue)
     return try await body(modelDir)
   }
+
+  /// Strict, descriptor-required loader that funnels every codec/LM weight load
+  /// through the Acervo Component Registry (v2 API).
+  ///
+  /// Entry point for all P1/P2 model load paths in mlx-audio-swift. The component
+  /// MUST be present in the Component Registry (registered via `ComponentDescriptor`).
+  /// No HuggingFace fallback, no legacy HF-discovery branch.
+  ///
+  /// Flow:
+  /// 1. Triggers lazy registration of all audio component descriptors.
+  /// 2. Verifies the component exists in the registry; throws
+  ///    `AcervoError.componentNotRegistered` if not.
+  /// 3. Ensures the component is downloaded + verified via
+  ///    `Acervo.ensureComponentReady`.
+  /// 4. Resolves the component's on-disk directory inside a
+  ///    `AcervoManager.shared.withComponentAccess` scope (which performs
+  ///    integrity verification of declared files).
+  /// 5. Invokes the caller's `load` closure with the resolved directory URL.
+  ///
+  /// `load` is synchronous so the entire read happens inside the managed-access
+  /// scope (per REQUIREMENTS.md:86: "File handles to critical codec weights must
+  /// live inside the managed-access scope so locking and SHA verification cannot
+  /// be bypassed"). After `ensureComponentReady` has returned, the actual
+  /// weight-load work (MLX `loadArrays`, JSON parsing) is CPU-bound and sync.
+  ///
+  /// - Parameters:
+  ///   - componentId: The Acervo component ID (must be a registered
+  ///                  `ComponentDescriptor`).
+  ///   - load: Closure invoked with the on-disk directory URL for the resolved
+  ///           component after integrity verification has succeeded.
+  /// - Returns: Whatever the `load` closure returns.
+  /// - Throws: `AcervoError.componentNotRegistered(componentId)` if the id is
+  ///           not in the Component Registry; or any error thrown by
+  ///           `Acervo.ensureComponentReady`, `withComponentAccess`,
+  ///           `Acervo.modelDirectory(for:)`, or the closure itself.
+  public static func loadWithAcervoStrict<T>(
+    componentId: String,
+    load: @Sendable (URL) throws -> T
+  ) async throws -> T {
+    _ = _registerAudioComponents
+
+    guard let descriptor = Acervo.component(componentId) else {
+      throw AcervoError.componentNotRegistered(componentId)
+    }
+
+    try await Acervo.ensureComponentReady(componentId)
+
+    // REQUIREMENTS.md:86 — `load` runs inside `withComponentAccess` so locking
+    // and SHA verification cannot be bypassed. SwiftAcervo's `perform:` closure
+    // is synchronous, which is fine: after `ensureComponentReady` has returned,
+    // the actual weight-load work (e.g., MLX `loadArrays`) is CPU-bound and sync.
+    //
+    // SwiftAcervo's `withComponentAccess<T: Sendable>` requires a Sendable return
+    // type. Many MLX model classes are not (nor need to be) Sendable — they are
+    // constructed once and handed back to the caller, never shared across
+    // actors. We launder the result through an `@unchecked Sendable` box so
+    // callers can return any T without marking their model types Sendable.
+    let box: _LoadBox<T> = try await AcervoManager.shared.withComponentAccess(componentId) { @Sendable _ in
+      let modelDir = try Acervo.modelDirectory(for: descriptor.repoId)
+      return _LoadBox(value: try load(modelDir))
+    }
+    return box.value
+  }
+}
+
+/// Internal @unchecked Sendable box used by `loadWithAcervoStrict` to launder
+/// non-Sendable model types through SwiftAcervo's `withComponentAccess<T: Sendable>`.
+/// The boxed value is constructed once inside the managed-access scope, handed
+/// back to the caller, and never shared — the unchecked annotation is safe.
+private struct _LoadBox<V>: @unchecked Sendable {
+  let value: V
 }
 
 // MARK: - AudioModelManager Extensions for Codec-Specific Repos
@@ -516,7 +874,7 @@ extension AudioModelRepo {
 
   /// Check if this model is available locally.
   public var isAvailable: Bool {
-    AudioModelManager.isModelAvailable(self)
+    Acervo.isComponentReady(componentId)
   }
 
   /// Get the local directory for this model if cached.
