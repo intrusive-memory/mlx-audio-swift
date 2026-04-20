@@ -93,6 +93,11 @@ public enum AudioModelRepo: String, CaseIterable, Sendable {
   /// Used by: MLXAudioSTT for on-device transcription.
   case glmASRNano2512_4bit = "mlx-community/GLM-ASR-Nano-2512-4bit"
 
+  /// Qwen3 ASR 0.6B (4-bit quantized) automatic speech recognition model.
+  /// Compact, quantized speech-to-text model based on the Qwen3 architecture.
+  /// Used by: MLXAudioSTT for on-device transcription.
+  case qwen3ASR_0_6B_4bit = "mlx-community/Qwen3-ASR-0.6B-4bit"
+
   /// Human-readable display name for the model variant.
   public var displayName: String {
     switch self {
@@ -124,6 +129,8 @@ public enum AudioModelRepo: String, CaseIterable, Sendable {
       return "Encodec 48 kHz Audio Codec (float32)"
     case .glmASRNano2512_4bit:
       return "GLM-ASR Nano (4-bit)"
+    case .qwen3ASR_0_6B_4bit:
+      return "Qwen3 ASR 0.6B (4-bit)"
     }
   }
 
@@ -161,6 +168,8 @@ public enum AudioModelRepo: String, CaseIterable, Sendable {
       return "encodec-48khz"
     case .glmASRNano2512_4bit:
       return "glm-asr"
+    case .qwen3ASR_0_6B_4bit:
+      return "qwen3-asr"
     }
   }
 
@@ -177,6 +186,8 @@ public enum AudioModelRepo: String, CaseIterable, Sendable {
          .qwen3TTS12Hz1_7BCustomVoiceBF16:
       return .languageModel
     case .glmASRNano2512_4bit:
+      return .encoder
+    case .qwen3ASR_0_6B_4bit:
       return .encoder
     }
   }
@@ -228,6 +239,22 @@ private let glmASRNano2512_4bitRequiredFiles: [ComponentFile] = [
   ComponentFile(relativePath: "model.safetensors.index.json"),
   ComponentFile(relativePath: "tokenizer.json"),
   ComponentFile(relativePath: "tokenizer_config.json"),
+]
+
+/// Required files for the Qwen3 ASR 0.6B (4-bit quantized) model.
+///
+/// tokenizer.json is NOT listed; the Swift loader auto-generates it at runtime
+/// from vocab.json + merges.txt when missing.
+private let qwen3ASR_0_6B_4bitRequiredFiles: [ComponentFile] = [
+  ComponentFile(relativePath: "config.json"),
+  ComponentFile(relativePath: "model.safetensors"),
+  ComponentFile(relativePath: "model.safetensors.index.json"),
+  ComponentFile(relativePath: "chat_template.json"),
+  ComponentFile(relativePath: "generation_config.json"),
+  ComponentFile(relativePath: "merges.txt"),
+  ComponentFile(relativePath: "preprocessor_config.json"),
+  ComponentFile(relativePath: "tokenizer_config.json"),
+  ComponentFile(relativePath: "vocab.json"),
 ]
 
 // MARK: - P2 TTS Model Files
@@ -413,6 +440,21 @@ private let audioComponentDescriptors: [ComponentDescriptor] = [
     minimumMemoryBytes: 1_200_000_000,
     metadata: [
       "modelType": "asr",
+      "quantization": "4-bit",
+      "stage": "P2",
+    ]
+  ),
+  ComponentDescriptor(
+    id: AudioModelRepo.qwen3ASR_0_6B_4bit.componentId,
+    type: .encoder,
+    displayName: "Qwen3 ASR 0.6B (4-bit)",
+    repoId: AudioModelRepo.qwen3ASR_0_6B_4bit.rawValue,
+    files: qwen3ASR_0_6B_4bitRequiredFiles,
+    estimatedSizeBytes: 700_000_000,
+    minimumMemoryBytes: 1_500_000_000,
+    metadata: [
+      "modelType": "asr",
+      "params": "0.6B",
       "quantization": "4-bit",
       "stage": "P2",
     ]
