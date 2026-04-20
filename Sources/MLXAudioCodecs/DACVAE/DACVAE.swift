@@ -386,25 +386,28 @@ public class DACVAE: Module {
         return Int(wavChunkLen)
     }
 
-    /// Load a pretrained DACVAE model from HuggingFace Hub.
-    public static func fromPretrained(_ repoId: String) async throws -> DACVAE {
-        let modelURL = try await ModelResolver.resolve(modelId: repoId)
+    /// Load the pretrained DACVAE model (mlx-community/dacvae-watermarked) via Acervo.
+    ///
+    /// The repo is pinned by the `dac-vae` ComponentDescriptor registered in
+    /// `AudioModelManager`; there is no caller-supplied repo parameter.
+    public static func fromPretrained() async throws -> DACVAE {
+        return try await AudioModelManager.loadWithAcervoStrict(componentId: "dac-vae") { modelURL in
+            // Load config
+            let configURL = modelURL.appendingPathComponent("config.json")
+            let configData = try Data(contentsOf: configURL)
+            let config = try JSONDecoder().decode(DACVAEConfig.self, from: configData)
 
-        // Load config
-        let configURL = modelURL.appendingPathComponent("config.json")
-        let configData = try Data(contentsOf: configURL)
-        let config = try JSONDecoder().decode(DACVAEConfig.self, from: configData)
+            // Create model
+            let model = DACVAE(config: config)
 
-        // Create model
-        let model = DACVAE(config: config)
+            // Load weights
+            let weightsURL = modelURL.appendingPathComponent("model.safetensors")
+            let weights = try loadArrays(url: weightsURL)
+            try model.update(parameters: ModuleParameters.unflattened(weights), verify: .noUnusedKeys)
 
-        // Load weights
-        let weightsURL = modelURL.appendingPathComponent("model.safetensors")
-        let weights = try loadArrays(url: weightsURL)
-        try model.update(parameters: ModuleParameters.unflattened(weights), verify: .noUnusedKeys)
+            eval(model.parameters())
 
-        eval(model.parameters())
-
-        return model
+            return model
+        }
     }
 }
