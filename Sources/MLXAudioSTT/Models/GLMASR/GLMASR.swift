@@ -269,12 +269,12 @@ private struct GenerationContext {
 
     /// Decode token to text.
     func decode(_ token: Int) -> String {
-        tokenizer.decode(tokens: [token])
+        tokenizer.decode(tokenIds: [token])
     }
 
     /// Decode tokens to text.
     func decode(_ tokens: [Int]) -> String {
-        tokenizer.decode(tokens: tokens)
+        tokenizer.decode(tokenIds: tokens)
     }
 }
 

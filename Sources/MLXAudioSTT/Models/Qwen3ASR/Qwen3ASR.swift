@@ -1011,7 +1011,7 @@ public class Qwen3ASRModel: Module {
             eval(logits)
         }
 
-        let text = tokenizer.decode(tokens: generatedTokens)
+        let text = tokenizer.decode(tokenIds: generatedTokens)
         return (text.trimmingCharacters(in: .whitespacesAndNewlines), promptTokenCount, generatedTokens.count)
     }
 
@@ -1070,7 +1070,7 @@ public class Qwen3ASRModel: Module {
             eval(logits)
         }
 
-        let text = tokenizer.decode(tokens: generatedTokens)
+        let text = tokenizer.decode(tokenIds: generatedTokens)
         return (
             text.trimmingCharacters(in: .whitespacesAndNewlines),
             promptTokenCount,
@@ -1287,7 +1287,7 @@ public class Qwen3ASRModel: Module {
                         chunkTokens.append(nextToken)
                         allGeneratedTokens.append(nextToken)
 
-                        let tokenText = tokenizer.decode(tokens: [nextToken])
+                        let tokenText = tokenizer.decode(tokenIds: [nextToken])
                         continuation.yield(.token(tokenText))
 
                         let nextTokenArray = MLXArray([Int32(nextToken)]).expandedDimensions(axis: 0)
@@ -1359,7 +1359,7 @@ public class Qwen3ASRModel: Module {
                 continuation.yield(.info(info))
 
                 // Emit final result
-                let text = tokenizer.decode(tokens: allGeneratedTokens)
+                let text = tokenizer.decode(tokenIds: allGeneratedTokens)
                 let output = STTOutput(
                     text: text.trimmingCharacters(in: .whitespacesAndNewlines),
                     promptTokens: totalPromptTokens,
