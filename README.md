@@ -26,11 +26,20 @@ We maintain compatibility with upstream's core architecture while expanding capa
 MLXAudio follows a modular design allowing you to import only what you need:
 
 - **MLXAudioCore**: Base types, protocols, and utilities
-- **MLXAudioCodecs**: Audio codec implementations (SNAC, Vocos, Mimi)
+- **MLXAudioCodecs**: Audio codec implementations (SNAC, Vocos, Mimi) with SwiftAcervo integration
 - **MLXAudioTTS**: Text-to-Speech models (Soprano, VyvoTTS, Orpheus, Marvis TTS, Pocket TTS)
 - **MLXAudioSTT**: Speech-to-Text models (GLMASR)
 - **MLXAudioSTS**: Speech-to-Speech (future)
 - **MLXAudioUI**: SwiftUI components for audio interfaces
+
+### Acervo Component Integration
+
+Audio codecs (SNAC, Mimi) register their model variants with the **SwiftAcervo Component Registry** at module initialization via `ComponentDescriptor`. This enables:
+
+- **Centralized component metadata**: HuggingFace repo IDs, required files, memory requirements stored in one place
+- **Intelligent downloads**: Acervo knows exactly what files to fetch before model code runs
+- **Shared model cache**: All `intrusive-memory` projects share codecs and TTS models at `~/Library/SharedModels/`
+- **Graceful fallback**: Model loading continues if component registration fails
 
 ## Installation
 
@@ -153,12 +162,45 @@ let parameters = GenerateParameters(
 let audio = try await model.generate(text: "Your text here", parameters: parameters)
 ```
 
-### Audio Codec Usage
+### Audio Model Management
+
+All audio models and codecs are managed through **SwiftAcervo**, providing automatic downloads and shared caching across intrusive-memory projects.
+
+#### Model Storage
+
+Models download automatically on first use to:
+```
+~/Library/SharedModels/<namespace>_<repo>/
+```
+
+For example, `mlx-community/Qwen3-TTS-12Hz-1.7B-Base-bf16` becomes:
+```
+~/Library/SharedModels/mlx-community_Qwen3-TTS-12Hz-1.7B-Base-bf16/
+```
+
+All intrusive-memory projects share this directory, so models downloaded by one app are immediately available to others without re-downloading.
+
+#### Primary Audio Models (P1)
+
+P1 models register with Acervo at module initialization via `ComponentDescriptor`:
+
+| Model | Type | Component ID | HuggingFace Repo |
+|-------|------|--------------|------------------|
+| SNAC 24 kHz | Audio Codec | `snac-24khz` | `mlx-community/snac_24khz` |
+| Mimi | Audio Codec | `mimi-pytorch-bf16` | `kyutai/moshiko-pytorch-bf16` |
+
+Each descriptor declares:
+- **Required files** for download (config.json, model.safetensors, etc.)
+- **Estimated size** and **minimum memory** requirements
+- **Metadata** (sample rate, bitrate, codebook structure)
+
+#### Audio Codec Usage
 
 ```swift
 import MLXAudioCodecs
 
 // Load SNAC codec
+// ComponentDescriptor registration happens automatically
 let snac = try await SNAC.fromPretrained("mlx-community/snac_24khz")
 
 // Encode audio to tokens
@@ -167,6 +209,14 @@ let tokens = try snac.encode(audio)
 // Decode tokens back to audio
 let reconstructed = try snac.decode(tokens)
 ```
+
+ComponentDescriptor registration enables Acervo to:
+- Verify required files before model code runs
+- Show download progress with accurate size estimates
+- Cache models efficiently in the shared directory
+- Fail gracefully if component registration encounters errors (models still load via fallback)
+
+See [AGENTS.md](AGENTS.md) for the full ComponentDescriptor pattern documentation and integration examples.
 
 ### Voice Selection for Multi-Voice Models
 

@@ -22,6 +22,21 @@ public final class SentencePieceTokenizer {
         self.tokenizer = try UnigramTokenizer(tokenizerJSON: json)
     }
 
+    /// Synchronous variant — no actual async work; used inside `loadWithAcervoStrict` closure.
+    public init(nBins: Int, modelFolderSync modelFolder: URL) throws {
+        let tokenizerJSON = modelFolder.appendingPathComponent("tokenizer.json")
+        guard FileManager.default.fileExists(atPath: tokenizerJSON.path),
+              let data = try? Data(contentsOf: tokenizerJSON) else {
+            throw NSError(
+                domain: "PocketTTSConditioners",
+                code: 1,
+                userInfo: [NSLocalizedDescriptionKey: "Missing tokenizer.json in \(modelFolder.path)"]
+            )
+        }
+        let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] ?? [:]
+        self.tokenizer = try UnigramTokenizer(tokenizerJSON: json)
+    }
+
     public func callAsFunction(_ text: String) -> TokenizedText {
         let ids = tokenizer.encodeWithByteFallback(text)
         let arr = MLXArray(ids).expandedDimensions(axis: 0)
@@ -47,6 +62,20 @@ public final class LUTConditioner: Module {
 
     public init(nBins: Int, modelFolder: URL, dim: Int, outputDim: Int) async throws {
         self.tokenizer = try await SentencePieceTokenizer(nBins: nBins, modelFolder: modelFolder)
+        self.dim = dim
+        self.outputDim = outputDim
+        self._embed = ModuleInfo(wrappedValue: Embedding(embeddingCount: nBins + 1, dimensions: dim))
+        if dim == outputDim {
+            self._output_proj = ModuleInfo(wrappedValue: nil)
+        } else {
+            self._output_proj = ModuleInfo(wrappedValue: Linear(dim, outputDim, bias: false))
+        }
+        super.init()
+    }
+
+    /// Synchronous variant — no actual async work; used inside `loadWithAcervoStrict` closure.
+    public init(nBins: Int, modelFolderSync modelFolder: URL, dim: Int, outputDim: Int) throws {
+        self.tokenizer = try SentencePieceTokenizer(nBins: nBins, modelFolderSync: modelFolder)
         self.dim = dim
         self.outputDim = outputDim
         self._embed = ModuleInfo(wrappedValue: Embedding(embeddingCount: nBins + 1, dimensions: dim))

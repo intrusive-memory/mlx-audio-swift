@@ -34,15 +34,15 @@ let package = Package(
         ),
     ],
     dependencies: [
-        .package(url: "https://github.com/ml-explore/mlx-swift.git", .upToNextMajor(from: "0.30.3")),
-        .package(url: "https://github.com/ml-explore/mlx-swift-lm.git", .upToNextMajor(from: "2.30.3")),
-        .package(url: "https://github.com/huggingface/swift-transformers.git", .upToNextMajor(from: "1.1.6")),
-        .package(url: "https://github.com/huggingface/swift-huggingface.git", .upToNextMajor(from: "0.6.0")),
-        .package(url: "https://github.com/intrusive-memory/SwiftAcervo.git", .upToNextMajor(from: "0.7.1")),
+        .package(url: "https://github.com/ml-explore/mlx-swift.git", .upToNextMajor(from: "0.31.3")),
+        .package(url: "https://github.com/ml-explore/mlx-swift-lm.git", .upToNextMajor(from: "3.31.3")),
+        .package(url: "https://github.com/huggingface/swift-transformers.git", .upToNextMajor(from: "1.3.0")),
+        .package(url: "https://github.com/intrusive-memory/SwiftAcervo.git", .upToNextMajor(from: "0.7.2")),
         // Transitive dependencies for Xcode 26 compatibility
-        .package(url: "https://github.com/apple/swift-numerics", from: "1.0.0"),
-        .package(url: "https://github.com/apple/swift-collections.git", from: "1.0.0"),
-        .package(url: "https://github.com/apple/swift-crypto.git", "3.0.0"..<"5.0.0"),
+        .package(url: "https://github.com/apple/swift-numerics", .upToNextMajor(from: "1.1.1")),
+        .package(url: "https://github.com/apple/swift-collections.git", .upToNextMajor(from: "1.4.1")),
+        .package(url: "https://github.com/apple/swift-crypto.git", .upToNextMajor(from: "4.4.0")),
+        .package(url: "https://github.com/ibireme/yyjson.git", .upToNextMajor(from: "0.12.0")),
     ],
     targets: [
         // MARK: - MLXAudioCore
@@ -51,7 +51,6 @@ let package = Package(
             dependencies: [
                 .product(name: "MLX", package: "mlx-swift"),
                 .product(name: "MLXNN", package: "mlx-swift"),
-                .product(name: "HuggingFace", package: "swift-huggingface"),
                 .product(name: "SwiftAcervo", package: "SwiftAcervo"),
                 // Transitive dependencies for MLX/MLXNN
                 .product(name: "Numerics", package: "swift-numerics"),
@@ -72,13 +71,14 @@ let package = Package(
                 .product(name: "MLX", package: "mlx-swift"),
                 .product(name: "MLXNN", package: "mlx-swift"),
                 .product(name: "MLXLMCommon", package: "mlx-swift-lm"),
-                .product(name: "HuggingFace", package: "swift-huggingface"),
+                .product(name: "SwiftAcervo", package: "SwiftAcervo"),
                 // Transitive dependencies for MLXLMCommon
                 .product(name: "Numerics", package: "swift-numerics"),
                 .product(name: "RealModule", package: "swift-numerics"),
                 .product(name: "ComplexModule", package: "swift-numerics"),
                 .product(name: "OrderedCollections", package: "swift-collections"),
                 .product(name: "Crypto", package: "swift-crypto"),
+                .product(name: "yyjson", package: "yyjson"),
             ],
             path: "Sources/MLXAudioCodecs"
         ),
@@ -93,7 +93,7 @@ let package = Package(
                 .product(name: "MLXNN", package: "mlx-swift"),
                 .product(name: "MLXLMCommon", package: "mlx-swift-lm"),
                 .product(name: "MLXLLM", package: "mlx-swift-lm"),
-                .product(name: "HuggingFace", package: "swift-huggingface"),
+                .product(name: "SwiftAcervo", package: "SwiftAcervo"),
                 .product(name: "Transformers", package: "swift-transformers"),
                 // Transitive dependencies for MLXLMCommon
                 .product(name: "Numerics", package: "swift-numerics"),
@@ -115,7 +115,7 @@ let package = Package(
                 .product(name: "MLXNN", package: "mlx-swift"),
                 .product(name: "MLXLMCommon", package: "mlx-swift-lm"),
                 .product(name: "MLXLLM", package: "mlx-swift-lm"),
-                .product(name: "HuggingFace", package: "swift-huggingface"),
+                .product(name: "SwiftAcervo", package: "SwiftAcervo"),
                 .product(name: "Transformers", package: "swift-transformers"),
                 // Transitive dependencies for MLXLMCommon
                 .product(name: "Numerics", package: "swift-numerics"),

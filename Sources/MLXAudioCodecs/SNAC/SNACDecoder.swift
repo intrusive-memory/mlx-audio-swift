@@ -153,22 +153,23 @@ public class SNAC: Module {
     }
 
     public static func fromPretrained(_ modelRepo: String) async throws -> SNAC {
-        let modelDir = try await ModelResolver.resolve(modelId: modelRepo)
+        print("[SNAC] Loading snac-24khz via Acervo strict API...")
+        return try await AudioModelManager.loadWithAcervoStrict(componentId: "snac-24khz") { modelDir in
+            let configPath = modelDir.appendingPathComponent("config.json")
+            let weightsPath = modelDir.appendingPathComponent("model.safetensors")
 
-        let configPath = modelDir.appendingPathComponent("config.json")
-        let weightsPath = modelDir.appendingPathComponent("model.safetensors")
+            guard FileManager.default.fileExists(atPath: weightsPath.path) else {
+                throw SNACError.modelNotFound("Could not find model at \(weightsPath.path)")
+            }
 
-        guard FileManager.default.fileExists(atPath: weightsPath.path) else {
-            throw SNACError.modelNotFound("Could not find model at \(weightsPath.path)")
+            let snac = try fromConfig(configPath)
+
+            let weights = try loadArrays(url: weightsPath)
+            try snac.update(parameters: ModuleParameters.unflattened(weights), verify: [.all])
+            eval(snac)
+
+            return snac
         }
-
-        let snac = try fromConfig(configPath)
-
-        let weights = try loadArrays(url: weightsPath)
-        try snac.update(parameters: ModuleParameters.unflattened(weights), verify: [.all])
-        eval(snac)
-
-        return snac
     }
 }
 
