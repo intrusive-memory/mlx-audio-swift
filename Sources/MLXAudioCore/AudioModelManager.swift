@@ -787,11 +787,11 @@ public enum AudioModelManager {
   ///    integrity verification of declared files).
   /// 5. Invokes the caller's `load` closure with the resolved directory URL.
   ///
-  /// Note: `withComponentAccess`'s `perform` closure is synchronous. To support
-  /// callers that need async work (tokenizer loading, etc.), we resolve the
-  /// directory URL inside the managed-access scope (where integrity checks run)
-  /// and then invoke the async `load` closure with that URL. The URL must not
-  /// be retained beyond the async load closure call.
+  /// `load` is synchronous so the entire read happens inside the managed-access
+  /// scope (per REQUIREMENTS.md:86: "File handles to critical codec weights must
+  /// live inside the managed-access scope so locking and SHA verification cannot
+  /// be bypassed"). After `ensureComponentReady` has returned, the actual
+  /// weight-load work (MLX `loadArrays`, JSON parsing) is CPU-bound and sync.
   ///
   /// - Parameters:
   ///   - componentId: The Acervo component ID (must be a registered
@@ -805,29 +805,24 @@ public enum AudioModelManager {
   ///           `Acervo.modelDirectory(for:)`, or the closure itself.
   public static func loadWithAcervoStrict<T: Sendable>(
     componentId: String,
-    load: @Sendable (URL) async throws -> T
+    load: @Sendable (URL) throws -> T
   ) async throws -> T {
-    // Trigger lazy registration of all audio component descriptors.
     _ = _registerAudioComponents
 
-    // Strict: the component MUST be in the registry.
     guard let descriptor = Acervo.component(componentId) else {
       throw AcervoError.componentNotRegistered(componentId)
     }
 
-    // Ensure the component is downloaded & verified.
     try await Acervo.ensureComponentReady(componentId)
 
-    // Run integrity-verified file access inside the managed-access scope,
-    // then extract the resolved base directory URL for the async load closure.
-    // withComponentAccess's `perform` closure is synchronous, so we resolve the
-    // directory URL inside the scope and pass it to the async load closure
-    // immediately after — the managed-access validation has already run and
-    // the caller's load closure is invoked with a verified directory.
-    let modelDir: URL = try await AcervoManager.shared.withComponentAccess(componentId) { @Sendable _ in
-      try Acervo.modelDirectory(for: descriptor.repoId)
+    // REQUIREMENTS.md:86 — `load` runs inside `withComponentAccess` so locking
+    // and SHA verification cannot be bypassed. SwiftAcervo's `perform:` closure
+    // is synchronous, which is fine: after `ensureComponentReady` has returned,
+    // the actual weight-load work (e.g., MLX `loadArrays`) is CPU-bound and sync.
+    return try await AcervoManager.shared.withComponentAccess(componentId) { @Sendable _ in
+      let modelDir = try Acervo.modelDirectory(for: descriptor.repoId)
+      return try load(modelDir)
     }
-    return try await load(modelDir)
   }
 }
 
