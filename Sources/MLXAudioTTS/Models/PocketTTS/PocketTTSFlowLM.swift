@@ -145,4 +145,41 @@ public final class FlowLMModel: Module {
             ldim: latentDim
         )
     }
+
+    /// Synchronous variant — used inside `loadWithAcervoStrict` closure where no `await` is permitted.
+    public static func fromConfigSync(_ config: PocketTTSFlowLMConfig, latentDim: Int, modelFolder: URL) throws -> FlowLMModel {
+        let dModel = config.transformer.dModel
+        let flowNet = SimpleMLPAdaLN(
+            inChannels: latentDim,
+            modelChannels: config.flow.dim,
+            outChannels: latentDim,
+            condChannels: dModel,
+            numResBlocks: config.flow.depth,
+            numTimeConds: 2
+        )
+
+        let conditioner = try LUTConditioner(
+            nBins: config.lookupTable.nBins,
+            modelFolderSync: modelFolder,
+            dim: config.lookupTable.dim,
+            outputDim: dModel
+        )
+
+        let transformer = PocketStreamingTransformer(
+            dModel: dModel,
+            numHeads: config.transformer.numHeads,
+            numLayers: config.transformer.numLayers,
+            dimFeedforward: Int(config.transformer.hiddenScale * dModel),
+            maxPeriod: config.transformer.maxPeriod,
+            layerScale: nil
+        )
+
+        return FlowLMModel(
+            conditioner: conditioner,
+            flowNet: flowNet,
+            transformer: transformer,
+            dim: dModel,
+            ldim: latentDim
+        )
+    }
 }
