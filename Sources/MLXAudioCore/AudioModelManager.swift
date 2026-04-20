@@ -704,14 +704,6 @@ public enum AudioModelManager {
     )
   }
 
-  /// Check whether a model is available in Acervo's shared directory.
-  ///
-  /// - Parameter modelRepo: The audio model variant to check.
-  /// - Returns: `true` if model is cached locally, `false` otherwise.
-  public static func isModelAvailable(_ modelRepo: AudioModelRepo) -> Bool {
-    Acervo.isModelAvailable(modelRepo.rawValue)
-  }
-
   /// Get the local directory path for a model if it's cached.
   ///
   /// - Parameter modelRepo: The audio model variant to locate.
@@ -882,7 +874,7 @@ extension AudioModelRepo {
 
   /// Check if this model is available locally.
   public var isAvailable: Bool {
-    AudioModelManager.isModelAvailable(self)
+    Acervo.isComponentReady(componentId)
   }
 
   /// Get the local directory for this model if cached.
