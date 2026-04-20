@@ -153,40 +153,41 @@ public extension MarvisTTSModel {
         progressHandler: @escaping (Progress) -> Void = { _ in }
     ) async throws -> MarvisTTSModel {
         Memory.cacheLimit = 100 * 1024 * 1024
+        print("[MarvisTTS] Loading marvis-tts-250m-8bit via Acervo strict API...")
 
-        let hfToken: String? = ProcessInfo.processInfo.environment["HF_TOKEN"]
-            ?? Bundle.main.object(forInfoDictionaryKey: "HF_TOKEN") as? String
+        // Step 1: Resolve model directory via Acervo and load sync-loadable assets
+        // (config, audio prompt URLs, weights) inside the managed-access closure.
+        // NOTE: textTokenizer loading is deferred to WU6.2 (mlx-swift-lm 3.x bump);
+        //       HubApi / ModelConfiguration / loadTokenizer call sites remain untouched here.
+        let (args, audioPromptURLs, weights, modelDirectoryURL) = try await AudioModelManager.loadWithAcervoStrict(
+            componentId: "marvis-tts-250m-8bit"
+        ) { modelDir in
+            let configFileURL = modelDir.appendingPathComponent("config.json")
+            let args = try JSONDecoder().decode(CSMModelArgs.self, from: Data(contentsOf: configFileURL))
 
-        guard let repoID = Repo.ID(rawValue: modelRepo) else {
-            throw NSError(
-                domain: "MarvisTTSModel",
-                code: 1,
-                userInfo: [NSLocalizedDescriptionKey: "Invalid repository ID: \(modelRepo)"]
-            )
-        }
-
-        let modelDirectoryURL = try await ModelUtils.resolveOrDownloadModel(
-            repoID: repoID,
-            requiredExtension: "safetensors",
-            hfToken: hfToken
-        )
-
-        let promptFileURLs = modelDirectoryURL.appendingPathComponent("prompts", isDirectory: true)
-        var audioPromptURLs = [URL]()
-        if FileManager.default.fileExists(atPath: promptFileURLs.path) {
-            for promptURL in try FileManager.default.contentsOfDirectory(at: promptFileURLs, includingPropertiesForKeys: nil) {
-                if promptURL.pathExtension == "wav" {
-                    audioPromptURLs.append(promptURL)
+            let promptDirURL = modelDir.appendingPathComponent("prompts", isDirectory: true)
+            var audioPromptURLs = [URL]()
+            if FileManager.default.fileExists(atPath: promptDirURL.path) {
+                for promptURL in try FileManager.default.contentsOfDirectory(
+                    at: promptDirURL, includingPropertiesForKeys: nil
+                ) {
+                    if promptURL.pathExtension == "wav" {
+                        audioPromptURLs.append(promptURL)
+                    }
                 }
             }
+
+            let weights = try marvisLoadWeights(from: modelDir)
+            return (args, audioPromptURLs, weights, modelDir)
         }
 
-        let configFileURL = modelDirectoryURL.appendingPathComponent("config.json")
-        let args = try JSONDecoder().decode(CSMModelArgs.self, from: Data(contentsOf: configFileURL))
-
+        // Step 2: Load async dependencies (tokenizer + audio codec).
+        // textTokenizer call site: deferred to WU6.2 (mlx-swift-lm 3.x bump).
         let textTokenizer = try await AutoTokenizer.from(modelFolder: modelDirectoryURL)
         let codec = try await Mimi.fromPretrained(progressHandler: progressHandler)
         let audioTokenizer = MimiTokenizer(codec)
+
+        // Step 3: Construct model with all resolved components.
         let model = MarvisTTSModel(
             config: args,
             repoId: modelRepo,
@@ -195,24 +196,23 @@ public extension MarvisTTSModel {
             audioTokenizer: audioTokenizer
         )
 
-        var weights = try marvisLoadWeights(from: modelDirectoryURL)
-        
+        // Step 4: Apply weights with optional quantization.
+        var mutableWeights = weights
         if let quantization = args.quantization,
            let groupSize = quantization["group_size"],
            let bits = quantization["bits"] {
             if case let .number(g) = groupSize, case let .number(b) = bits {
                 quantize(model: model, groupSize: Int(g), bits: Int(b)) { path, _ in
-                    weights["\(path).scales"] != nil
+                    mutableWeights["\(path).scales"] != nil
                 }
             }
-            
         } else {
-            weights = sanitize(weights: weights)
+            mutableWeights = sanitize(weights: mutableWeights)
         }
-        
-        let parameters = ModuleParameters.unflattened(weights)
+
+        let parameters = ModuleParameters.unflattened(mutableWeights)
         try model.update(parameters: parameters, verify: [.all])
-        
+
         eval(model)
         return model
     }
