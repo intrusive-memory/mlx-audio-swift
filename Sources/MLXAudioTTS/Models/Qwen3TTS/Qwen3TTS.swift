@@ -22,7 +22,7 @@ public final class Qwen3TTSModel: Module, SpeechGenerationModel, @unchecked Send
     let talker: Qwen3TTSTalkerForConditionalGeneration
     var speechTokenizer: Qwen3TTSSpeechTokenizer?
     var speakerEncoder: Qwen3TTSSpeakerEncoder?
-    var tokenizer: Tokenizer?
+    var tokenizer: Tokenizers.Tokenizer?
 
     /// The output audio sample rate in Hz (typically 24000).
     public var sampleRate: Int { config.sampleRate }
