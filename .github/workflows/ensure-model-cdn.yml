@@ -24,7 +24,7 @@ jobs:
           - {id: qwen3-tts-12hz-1.7b-base-bf16, repo: mlx-community/Qwen3-TTS-12Hz-1.7B-Base-bf16, slug: mlx-community_Qwen3-TTS-12Hz-1.7B-Base-bf16}
           - {id: qwen3-tts-12hz-1.7b-voice-design-bf16, repo: mlx-community/Qwen3-TTS-12Hz-1.7B-VoiceDesign-bf16, slug: mlx-community_Qwen3-TTS-12Hz-1.7B-VoiceDesign-bf16}
           - {id: qwen3-tts-12hz-1.7b-custom-voice-bf16, repo: mlx-community/Qwen3-TTS-12Hz-1.7B-CustomVoice-bf16, slug: mlx-community_Qwen3-TTS-12Hz-1.7B-CustomVoice-bf16}
-          - {id: dac-vae, repo: mlx-community/dac-vae-48khz, slug: mlx-community_dac-vae-48khz}
+          - {id: dac-vae, repo: mlx-community/dacvae-watermarked, slug: mlx-community_dacvae-watermarked}
 
     env:
       MODEL_ID: ${{ matrix.model.id }}

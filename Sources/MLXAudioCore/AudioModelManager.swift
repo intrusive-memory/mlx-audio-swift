@@ -73,10 +73,10 @@ public enum AudioModelRepo: String, CaseIterable, Sendable {
 
   // MARK: - Audio Codecs (P2 — Extended)
 
-  /// DAC VAE 48 kHz neural audio codec.
-  /// Continuous-latent VAE-style codec for 48 kHz audio encoding/decoding.
+  /// DAC VAE (watermarked) neural audio codec — MLX port of Facebook's DACVAE.
+  /// Continuous-latent VAE-style codec with embedded watermarking support.
   /// Used by: SAM-Audio and generative models requiring continuous latent representations.
-  case dacVAE48kHz = "mlx-community/dac-vae-48khz"
+  case dacVAEWatermarked = "mlx-community/dacvae-watermarked"
 
   /// Human-readable display name for the model variant.
   public var displayName: String {
@@ -101,8 +101,8 @@ public enum AudioModelRepo: String, CaseIterable, Sendable {
       return "Qwen3-TTS 12Hz 1.7B VoiceDesign (BF16)"
     case .qwen3TTS12Hz1_7BCustomVoiceBF16:
       return "Qwen3-TTS 12Hz 1.7B CustomVoice (BF16)"
-    case .dacVAE48kHz:
-      return "DAC VAE 48 kHz Audio Codec"
+    case .dacVAEWatermarked:
+      return "DAC VAE Audio Codec"
     }
   }
 
@@ -132,7 +132,7 @@ public enum AudioModelRepo: String, CaseIterable, Sendable {
       return "qwen3-tts-12hz-1.7b-voice-design-bf16"
     case .qwen3TTS12Hz1_7BCustomVoiceBF16:
       return "qwen3-tts-12hz-1.7b-custom-voice-bf16"
-    case .dacVAE48kHz:
+    case .dacVAEWatermarked:
       return "dac-vae"
     }
   }
@@ -143,7 +143,7 @@ public enum AudioModelRepo: String, CaseIterable, Sendable {
   /// TTS models are language models (autoregressive generative models).
   public var componentType: ComponentType {
     switch self {
-    case .snac24kHz, .mimiPyTorchBF16, .dacVAE48kHz:
+    case .snac24kHz, .mimiPyTorchBF16, .dacVAEWatermarked:
       return .decoder
     case .vyvoTTSBeta4bit, .orpheusTTS, .sopranoTTS, .marvisTTS, .pocketTTS,
          .qwen3TTS12Hz1_7BBaseBF16, .qwen3TTS12Hz1_7BVoiceDesignBF16,
@@ -171,10 +171,10 @@ private let mimiPyTorchBF16RequiredFiles: [ComponentFile] = [
   ComponentFile(relativePath: "tokenizer-e351c8d8-checkpoint125.safetensors"),
 ]
 
-/// Required files for the DAC VAE 48 kHz model variant.
+/// Required files for the DAC VAE (Watermarked) model variant.
 ///
 /// Continuous-latent VAE codec: config plus weight file.
-private let dacVAE48kHzRequiredFiles: [ComponentFile] = [
+private let dacVAEWatermarkedRequiredFiles: [ComponentFile] = [
   ComponentFile(relativePath: "config.json"),
   ComponentFile(relativePath: "model.safetensors"),
 ]
@@ -309,15 +309,14 @@ private let audioComponentDescriptors: [ComponentDescriptor] = [
     ]
   ),
   ComponentDescriptor(
-    id: AudioModelRepo.dacVAE48kHz.componentId,
+    id: AudioModelRepo.dacVAEWatermarked.componentId,
     type: .decoder,
-    displayName: "DAC VAE 48 kHz Audio Codec",
-    repoId: AudioModelRepo.dacVAE48kHz.rawValue,
-    files: dacVAE48kHzRequiredFiles,
+    displayName: "DAC VAE Audio Codec",
+    repoId: AudioModelRepo.dacVAEWatermarked.rawValue,
+    files: dacVAEWatermarkedRequiredFiles,
     estimatedSizeBytes: 200_000_000,
     minimumMemoryBytes: 500_000_000,
     metadata: [
-      "sampleRate": "48000",
       "modelType": "codec",
       "stage": "P2",
     ]
