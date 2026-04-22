@@ -900,7 +900,7 @@ public class SopranoModel: Module, KVCacheDimensionProvider, SpeechGenerationMod
             return (model, modelDir)
         }
 
-        model.tokenizer = try await AutoTokenizer.from(modelFolder: modelDir)
+        model.tokenizer = try await AutoTokenizer.from(directory: modelDir)
         if model.tokenizer != nil {
             model.stopTokenId = model.tokenizer?.eosTokenId ?? 3
         }

@@ -1700,7 +1700,7 @@ public final class Qwen3TTSModel: Module, SpeechGenerationModel, @unchecked Send
 
         // Phase 2 — async tokenizer load outside managed-access scope.
         do {
-            model.tokenizer = try await AutoTokenizer.from(modelFolder: modelDir)
+            model.tokenizer = try await AutoTokenizer.from(directory: modelDir)
         } catch {
             print("Warning: Could not load tokenizer: \(error)")
         }
