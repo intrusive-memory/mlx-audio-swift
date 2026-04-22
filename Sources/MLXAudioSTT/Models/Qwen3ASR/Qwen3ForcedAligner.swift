@@ -574,7 +574,7 @@ public class Qwen3ForcedAlignerModel: Module {
 
         // Phase 2 — load tokenizer async outside managed-access scope.
         // Tokenizer files are read-only on disk post-verification; this is safe.
-        model.tokenizer = try await AutoTokenizer.from(modelFolder: modelDir)
+        model.tokenizer = try await AutoTokenizer.from(directory: modelDir)
 
         return model
     }
