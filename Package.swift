@@ -36,7 +36,8 @@ let package = Package(
     dependencies: [
         .package(url: "https://github.com/ml-explore/mlx-swift.git", .upToNextMajor(from: "0.31.3")),
         .package(url: "https://github.com/ml-explore/mlx-swift-lm.git", .upToNextMajor(from: "3.31.3")),
-        .package(url: "https://github.com/huggingface/swift-transformers.git", .upToNextMajor(from: "1.3.0")),
+        .package(url: "https://github.com/DePasqualeOrg/swift-tokenizers-mlx", .upToNextMajor(from: "0.2.0"), traits: ["Swift"]),
+        .package(url: "https://github.com/DePasqualeOrg/swift-tokenizers.git", .upToNextMajor(from: "0.3.2"), traits: ["Swift"]),
         .package(url: "https://github.com/intrusive-memory/SwiftAcervo.git", .upToNextMajor(from: "0.7.2")),
         // Transitive dependencies for Xcode 26 compatibility
         .package(url: "https://github.com/apple/swift-numerics", .upToNextMajor(from: "1.1.1")),
@@ -94,7 +95,8 @@ let package = Package(
                 .product(name: "MLXLMCommon", package: "mlx-swift-lm"),
                 .product(name: "MLXLLM", package: "mlx-swift-lm"),
                 .product(name: "SwiftAcervo", package: "SwiftAcervo"),
-                .product(name: "Transformers", package: "swift-transformers"),
+                .product(name: "MLXLMTokenizers", package: "swift-tokenizers-mlx"),
+                .product(name: "Tokenizers", package: "swift-tokenizers"),
                 // Transitive dependencies for MLXLMCommon
                 .product(name: "Numerics", package: "swift-numerics"),
                 .product(name: "RealModule", package: "swift-numerics"),
@@ -116,7 +118,8 @@ let package = Package(
                 .product(name: "MLXLMCommon", package: "mlx-swift-lm"),
                 .product(name: "MLXLLM", package: "mlx-swift-lm"),
                 .product(name: "SwiftAcervo", package: "SwiftAcervo"),
-                .product(name: "Transformers", package: "swift-transformers"),
+                .product(name: "MLXLMTokenizers", package: "swift-tokenizers-mlx"),
+                .product(name: "Tokenizers", package: "swift-tokenizers"),
                 // Transitive dependencies for MLXLMCommon
                 .product(name: "Numerics", package: "swift-numerics"),
                 .product(name: "RealModule", package: "swift-numerics"),
