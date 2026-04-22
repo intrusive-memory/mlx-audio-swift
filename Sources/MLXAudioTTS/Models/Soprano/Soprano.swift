@@ -455,8 +455,9 @@ public class SopranoModel: Module, KVCacheDimensionProvider, SpeechGenerationMod
                 allTokens.append(contentsOf: tokens)
             } else {
                 // For regular text, pre-tokenize to handle spaces correctly
-                // swift-transformers has a bug where BPETokenizer.tokenize() drops space tokens
-                // because " ".split(separator: " ") returns empty array
+                // For regular text, pre-tokenize to handle spaces correctly (the prior tokenizer
+                // had a bug where BPETokenizer.tokenize() dropped space tokens because
+                // " ".split(separator: " ") returns an empty array)
                 let chunks = preTokenizeText(segment)
 
                 for chunk in chunks {

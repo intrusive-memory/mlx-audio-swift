@@ -72,6 +72,7 @@ let package = Package(
                 .product(name: "MLX", package: "mlx-swift"),
                 .product(name: "MLXNN", package: "mlx-swift"),
                 .product(name: "MLXLMCommon", package: "mlx-swift-lm"),
+                .product(name: "Tokenizers", package: "swift-tokenizers"),
                 .product(name: "SwiftAcervo", package: "SwiftAcervo"),
                 // Transitive dependencies for MLXLMCommon
                 .product(name: "Numerics", package: "swift-numerics"),
