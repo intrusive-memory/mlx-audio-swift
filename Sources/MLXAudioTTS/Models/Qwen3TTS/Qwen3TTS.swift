@@ -1700,7 +1700,7 @@ public final class Qwen3TTSModel: Module, SpeechGenerationModel, @unchecked Send
 
         // Phase 2 — async tokenizer load outside managed-access scope.
         do {
-            model.tokenizer = try await AutoTokenizer.from(modelFolder: modelDir)
+            model.tokenizer = try await AutoTokenizer.from(directory: modelDir)
         } catch {
             print("Warning: Could not load tokenizer: \(error)")
         }
@@ -1744,7 +1744,7 @@ public final class Qwen3TTSModel: Module, SpeechGenerationModel, @unchecked Send
     // MARK: - Tokenizer Generation
 
     /// Qwen3-TTS repos ship with a slow tokenizer (vocab.json + merges.txt) but
-    /// swift-transformers requires tokenizer.json (fast tokenizer format). This
+    /// swift-tokenizers requires tokenizer.json (fast tokenizer format). This
     /// generates the fast tokenizer JSON from the available files.
     private static func generateTokenizerJson(
         vocabPath: URL,

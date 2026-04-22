@@ -583,7 +583,7 @@ public class LlamaTTSModel: Module, KVCacheDimensionProvider, SpeechGenerationMo
 
     public func post_load_hook(model: LlamaTTSModel, modelDir: URL) async throws {
         if model.tokenizer == nil {
-            model.tokenizer = try await AutoTokenizer.from(modelFolder: modelDir)
+            model.tokenizer = try await AutoTokenizer.from(directory: modelDir)
         }
         if model._snacModel == nil {
             model._snacModel = try await SNAC.fromPretrained("mlx-community/snac_24khz")
