@@ -38,5 +38,6 @@ Read and follow all instructions in [AGENTS.md](AGENTS.md) before starting any t
     -only-testing:MLXAudioTests/LlamaTTSModuleSetupTests \
     -only-testing:MLXAudioTests/ParityFixtureLoaderSmokeTests \
     -only-testing:MLXAudioTests/PocketTTSModuleSetupTests \
+    -only-testing:MLXAudioTests/SopranoModuleSetupTests \
     CODE_SIGNING_ALLOWED=NO
   ```
