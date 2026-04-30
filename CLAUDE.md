@@ -96,6 +96,7 @@ nightly workflow (`.github/workflows/nightly-tests.yaml`, Sortie 9).
 | `Qwen3ASRTests` | Qwen3-ASR | Downloads Qwen3-ASR model |
 | `GLMASRTests` | GLM-ASR | Downloads GLM-ASR model |
 | `MarvisTTSGenerateTests` | Marvis TTS (CSM / Sesame) | Downloads Marvis-AI/marvis-tts-250m-v0.2-MLX-8bit + Mimi codec |
+| `DeterministicGenerationTests` | Qwen3TTS, LlamaTTS, SopranoTTS, PocketTTS | Downloads all four models; asserts reproducible token-id sequences (Sortie 21). Fixtures in `Tests/media/deterministic/` are placeholders until regenerated locally. PocketTTS is PARTIAL (flow-matching model has no discrete token IDs; uses audio sample-count proxy). |
 
 To run a single local-only suite:
   ```bash

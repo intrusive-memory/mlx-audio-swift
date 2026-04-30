@@ -135,6 +135,15 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             2>&1 | tee test-marvis-output.log
 
+      - name: Test Deterministic Generation (local-only)
+        run: |
+          xcodebuild test-without-building \
+            -scheme MLXAudio-Package \
+            -destination 'platform=macOS,arch=arm64' \
+            -only-testing:MLXAudioTests/DeterministicGenerationTests \
+            CODE_SIGNING_ALLOWED=NO \
+            2>&1 | tee test-deterministic-output.log
+
       - name: Upload nightly test output
         if: always()
         uses: actions/upload-artifact@v4
@@ -152,4 +161,5 @@ jobs:
             test-qwen3asr-output.log
             test-glmasr-output.log
             test-marvis-output.log
+            test-deterministic-output.log
           retention-days: 14
