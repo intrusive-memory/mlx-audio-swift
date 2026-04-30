@@ -18,6 +18,7 @@
 
 import Testing
 import MLX
+import MLXLMCommon
 import Foundation
 
 @testable import MLXAudioCore
@@ -62,10 +63,12 @@ struct MarvisTTSGenerateTests {
         print("\u{001B}[32mGenerated audio shape: \(audio.shape)\u{001B}[0m")
 
         // 3. Shape assertions: mono (1-D) and ≥ 1 second at 24 kHz
+        let shapeDesc = "\(audio.shape)"
+        let samplesDesc = "\(audio.shape[0])"
         #expect(audio.shape.count == 1,
-                "Expected 1-D mono audio array; got shape \(audio.shape)")
+                "Expected 1-D mono audio array; got shape \(shapeDesc)")
         #expect(audio.shape[0] >= 24000,
-                "Expected ≥ 24 000 samples (≥ 1 s at 24 kHz); got \(audio.shape[0])")
+                "Expected >=24000 samples (>=1s at 24 kHz); got \(samplesDesc)")
 
         // 4. Save generated audio for manual inspection
         let outputURL = FileManager.default.temporaryDirectory

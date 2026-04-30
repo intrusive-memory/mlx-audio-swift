@@ -18,13 +18,22 @@ Layer families (Sortie 1):
   snac_vq/              SNAC vector quantizer (single layer, small codebook)
   mimi_rvq/             Mimi residual VQ (2 layers, small codebook)
 
-Sortie 16 will EXTEND this script with additional DSP fixtures
-(mel spectrogram, hann window, resampling). It will NOT replace it.
+Layer families (Sortie 16 — DSP numeric-parity extension):
+  dsp_hann/             Symmetric Hann window (matches numpy.hanning)
+  dsp_fft/              MLXFFT.rfft against numpy.fft.rfft on a fixed waveform
+  dsp_stft/             stft() — reflect-padded framing + windowed real FFT
+  dsp_istft/            MLXFFT.irfft against numpy.fft.irfft (single frame)
+  dsp_mel/              computeMelSpectrogramAccelerate(.noScaling) over a
+                        440 Hz / 1 s / 24 kHz sine (truncated to 4096 samples
+                        for fixture size). Slaney-normalized HTK mel filterbank.
+  dsp_resample_48to24/  *NOT GENERATED* — Swift has no resample implementation.
+                        Documented here for future Sortie. Do not enable.
 
 Usage:
   python3 Tests/media/parity/_generate.py --all
   python3 Tests/media/parity/_generate.py --family dsp
-  python3 Tests/media/parity/_generate.py --family vocos_istft_head
+  python3 Tests/media/parity/_generate.py --family dsp_hann
+  python3 Tests/media/parity/_generate.py --family dsp_mel
 
 Requirements: Python 3.11+, torch, numpy, safetensors.
 """
@@ -512,6 +521,296 @@ def gen_mimi_rvq(out_dir: Path) -> None:
     )
 
 
+# ===========================================================================
+# Sortie 16 — DSP numeric-parity fixtures
+# ===========================================================================
+#
+# Each `gen_dsp_*` function below targets one Swift DSP entry point. The
+# Python reference is chosen to match the Swift convention as closely as
+# possible. Conventions for each function are documented inline; deviations
+# from PyTorch/numpy defaults are called out.
+#
+# Swift entry points (file:line as of Sortie 16 authoring):
+#   - hanningWindow(size:)                Sources/MLXAudioCore/DSP.swift:19
+#   - stft(audio:window:nFft:hopLength:)  Sources/MLXAudioCore/DSP.swift:155
+#   - MLXFFT.rfft / MLXFFT.irfft          MLX-Swift Source/MLXFFT/FFT.swift
+#   - computeMelSpectrogram(...)          Sources/MLXAudioCore/DSP.swift:387
+#     (Accelerate path with .whisper scaling; tests use the
+#      computeMelSpectrogramAccelerate() entry with .noScaling for parity.)
+#
+# All Sortie 16 fixtures use float32 contiguous tensors. The Swift loader
+# expects all three files (input/weights/expected); for DSP functions with
+# no learned weights, `weights.safetensors` carries a 1-element placeholder
+# tensor so the loader contract is satisfied.
+
+# Convention used across Sortie 16 fixtures:
+#   - Window: numpy.hanning(N) ≡ symmetric Hann, period N-1
+#     (matches Swift hanningWindow(size:) at DSP.swift:19, NOT
+#      torch.hann_window(N, periodic=True) which uses period N).
+#   - FFT normalization: numpy.fft default ("backward" — no scaling on
+#     forward, 1/N on inverse). Matches MLXFFT default (no `norm=` arg
+#     used in any Sources/ call site).
+#   - STFT padding: reflect-mode where the boundary sample is NOT
+#     duplicated. Matches Swift's manual padding at DSP.swift:166-172,
+#     equivalent to numpy.pad(x, (n//2, n//2), mode="reflect").
+
+_PLACEHOLDER_WEIGHT = {"placeholder": torch.zeros(1, dtype=torch.float32)}
+
+
+def _numpy_hann(n: int) -> np.ndarray:
+    """Symmetric Hann window matching Swift hanningWindow(size:).
+
+    Swift impl: w[k] = 0.5 * (1 - cos(2π k / (N-1)))    for k in 0..<N
+    numpy.hanning(N) uses the same formula.
+    """
+    return np.hanning(n).astype(np.float32)
+
+
+def _sine_440_24k(num_samples: int) -> np.ndarray:
+    """440 Hz sine at 24 kHz, num_samples long, float32, no offset."""
+    t = np.arange(num_samples, dtype=np.float64) / 24_000.0
+    return np.sin(2.0 * np.pi * 440.0 * t).astype(np.float32)
+
+
+# ---------------------------------------------------------------------------
+# Family 7 (Sortie 16): symmetric Hann window
+# ---------------------------------------------------------------------------
+def gen_dsp_hann(out_dir: Path) -> None:
+    """Reference for hanningWindow(size:) at DSP.swift:19.
+
+    Input:    a single int 'size' encoded as float32 tensor (shape [1]).
+    Weights:  placeholder.
+    Expected: window of length 'size'.
+    """
+    _seed_everything()
+    size = 256
+    window = _numpy_hann(size)
+
+    _save(out_dir / "input.safetensors", {"size": torch.tensor([float(size)], dtype=torch.float32)})
+    _save(out_dir / "weights.safetensors", _PLACEHOLDER_WEIGHT)
+    _save(out_dir / "expected.safetensors", {"window": torch.from_numpy(window)})
+
+
+# ---------------------------------------------------------------------------
+# Family 8 (Sortie 16): real FFT
+# ---------------------------------------------------------------------------
+def gen_dsp_fft(out_dir: Path) -> None:
+    """Reference for MLXFFT.rfft on a 1D float32 input.
+
+    Convention: numpy.fft.rfft default normalization (none). Swift call sites
+    use MLXFFT.rfft without a `norm` argument, which matches numpy default.
+
+    Input:    1D real waveform of length 256 (440 Hz sine snippet).
+    Expected: real and imag parts of rfft, shape [129] each (n_fft//2+1).
+              Stored as separate tensors because safetensors does not
+              represent complex floats — the Swift side reconstructs from
+              the real/imag pair when comparing.
+    """
+    _seed_everything()
+    n_fft = 256
+    audio = _sine_440_24k(n_fft)
+    spec = np.fft.rfft(audio).astype(np.complex64)
+
+    _save(out_dir / "input.safetensors", {"audio": torch.from_numpy(audio)})
+    _save(out_dir / "weights.safetensors", _PLACEHOLDER_WEIGHT)
+    _save(
+        out_dir / "expected.safetensors",
+        {
+            "spec_real": torch.from_numpy(spec.real.astype(np.float32)),
+            "spec_imag": torch.from_numpy(spec.imag.astype(np.float32)),
+        },
+    )
+
+
+# ---------------------------------------------------------------------------
+# Family 9 (Sortie 16): STFT
+# ---------------------------------------------------------------------------
+def gen_dsp_stft(out_dir: Path) -> None:
+    """Reference for stft(audio:window:nFft:hopLength:) at DSP.swift:155.
+
+    Swift impl:
+      1. Reflect-pad audio by n_fft/2 on each side. Swift's padding code
+         (DSP.swift:166-172) takes audio[1..padding+1] reversed at the
+         start and audio[L-padding-1..L-1] reversed at the end — this is
+         "reflect" mode where the boundary sample is NOT duplicated, i.e.
+         numpy.pad(x, (p, p), mode='reflect').
+      2. Hop into n_fft-sized frames.
+      3. Multiply each frame by `window`.
+      4. rfft along axis=1, returning [numFrames, nFreqs] complex.
+
+    We reproduce the exact pipeline in numpy (NOT torch.stft, which
+    centers differently for non-power-of-2 win_length).
+    """
+    _seed_everything()
+    n_fft = 64
+    hop_length = 16
+    audio = _sine_440_24k(256)  # 256 samples, 440 Hz
+    window = _numpy_hann(n_fft)
+
+    padding = n_fft // 2
+    padded = np.pad(audio, (padding, padding), mode="reflect")
+    num_frames = 1 + (padded.shape[0] - n_fft) // hop_length
+
+    n_freqs = n_fft // 2 + 1
+    spec_real = np.zeros((num_frames, n_freqs), dtype=np.float32)
+    spec_imag = np.zeros((num_frames, n_freqs), dtype=np.float32)
+    for i in range(num_frames):
+        start = i * hop_length
+        frame = padded[start : start + n_fft] * window
+        s = np.fft.rfft(frame).astype(np.complex64)
+        spec_real[i] = s.real
+        spec_imag[i] = s.imag
+
+    _save(out_dir / "input.safetensors", {"audio": torch.from_numpy(audio)})
+    _save(
+        out_dir / "weights.safetensors",
+        {"window": torch.from_numpy(window)},
+    )
+    _save(
+        out_dir / "expected.safetensors",
+        {
+            "spec_real": torch.from_numpy(spec_real),
+            "spec_imag": torch.from_numpy(spec_imag),
+        },
+    )
+
+
+# ---------------------------------------------------------------------------
+# Family 10 (Sortie 16): inverse real FFT
+# ---------------------------------------------------------------------------
+def gen_dsp_istft(out_dir: Path) -> None:
+    """Reference for MLXFFT.irfft on a 1D complex spectrum.
+
+    Convention: numpy.fft.irfft default normalization (1/N). Matches
+    MLXFFT.irfft default — Sources/ call sites at Vocos.swift:116 and
+    SopranoDecoder.swift:152 do not pass an explicit norm.
+
+    Note: a top-level public iSTFT function does not exist in Sources/.
+    The Vocos ISTFTHead.performISTFT method is private and bundles
+    overlap-add synthesis; testing it directly would require model
+    instantiation. We therefore exercise the lowest-level building block
+    (MLXFFT.irfft) which is the actual primitive shared across both Vocos
+    and Soprano iSTFT pipelines.
+
+    Input:    complex spectrum (real/imag pair) of length n_fft//2+1.
+    Expected: time-domain signal of length n_fft.
+    """
+    _seed_everything()
+    n_fft = 256
+    audio_in = _sine_440_24k(n_fft)
+    spec = np.fft.rfft(audio_in).astype(np.complex64)
+    audio_back = np.fft.irfft(spec, n=n_fft).astype(np.float32)
+
+    _save(
+        out_dir / "input.safetensors",
+        {
+            "spec_real": torch.from_numpy(spec.real.astype(np.float32)),
+            "spec_imag": torch.from_numpy(spec.imag.astype(np.float32)),
+        },
+    )
+    _save(out_dir / "weights.safetensors", _PLACEHOLDER_WEIGHT)
+    _save(out_dir / "expected.safetensors", {"audio": torch.from_numpy(audio_back)})
+
+
+# ---------------------------------------------------------------------------
+# Family 11 (Sortie 16): mel spectrogram
+# ---------------------------------------------------------------------------
+def gen_dsp_mel(out_dir: Path) -> None:
+    """Reference for computeMelSpectrogramAccelerate(... .noScaling).
+
+    Matches the Swift Accelerate path at DSP.swift:324 by replicating the
+    pipeline step-for-step:
+      1. Reflect-pad audio by n_fft/2 (same as stft above).
+      2. Frame at hop_length stride, multiply by symmetric Hann.
+      3. rfft → magnitude squared (power spectrum).
+      4. Multiply by Slaney-normalized HTK mel filterbank
+         [n_freqs, n_mels].
+      5. Output shape [num_frames, n_mels]. NO log scaling
+         (Swift caller passes logScale: .noScaling).
+
+    Swift's Accelerate impl stores Nyquist in the imag[0] slot using
+    vDSP convention (DSP.swift:291). For a "clean" comparison we use the
+    standard rfft-and-magnitude calculation — Swift's Accelerate output
+    is mathematically equal to |rfft(x)|^2 modulo float rounding because
+    vDSP's split-complex convention only repacks the storage, not the
+    math.
+
+    Input: 4096 samples of 440 Hz sine at 24 kHz (~170 ms; small enough
+    for a tiny fixture, big enough to exercise multi-frame mel matmul).
+    """
+    _seed_everything()
+    sample_rate = 24_000
+    n_fft = 256
+    hop_length = 64
+    n_mels = 32
+    num_samples = 4096
+
+    audio = _sine_440_24k(num_samples)
+    window = _numpy_hann(n_fft)
+
+    # ----- Power spectrum via reflect-padded STFT -----
+    padding = n_fft // 2
+    padded = np.pad(audio, (padding, padding), mode="reflect")
+    num_frames = 1 + (padded.shape[0] - n_fft) // hop_length
+    n_freqs = n_fft // 2 + 1
+
+    power = np.zeros((num_frames, n_freqs), dtype=np.float32)
+    for i in range(num_frames):
+        start = i * hop_length
+        frame = padded[start : start + n_fft] * window
+        s = np.fft.rfft(frame)
+        power[i] = (s.real * s.real + s.imag * s.imag).astype(np.float32)
+
+    # ----- Slaney-normalized HTK mel filterbank -----
+    # Hand-rolled to match Swift melFiltersFlat at DSP.swift:66.
+    f_min = 0.0
+    f_max = sample_rate / 2.0
+
+    def hz_to_mel(f: np.ndarray | float) -> np.ndarray:
+        return 2595.0 * np.log10(1.0 + np.asarray(f) / 700.0)
+
+    def mel_to_hz(m: np.ndarray) -> np.ndarray:
+        return 700.0 * (np.power(10.0, m / 2595.0) - 1.0)
+
+    all_freqs = np.arange(n_freqs, dtype=np.float64) * sample_rate / n_fft
+    m_min = hz_to_mel(f_min)
+    m_max = hz_to_mel(f_max)
+    m_pts = np.linspace(m_min, m_max, n_mels + 2)
+    f_pts = mel_to_hz(m_pts)
+
+    fb = np.zeros((n_freqs, n_mels), dtype=np.float64)
+    for i in range(n_freqs):
+        for j in range(n_mels):
+            low, center, high = f_pts[j], f_pts[j + 1], f_pts[j + 2]
+            af = all_freqs[i]
+            if low <= af < center:
+                fb[i, j] = (af - low) / (center - low)
+            elif center <= af <= high:
+                fb[i, j] = (high - af) / (high - center)
+
+    # Slaney normalization: enorm = 2 / (f_pts[j+2] - f_pts[j])
+    for j in range(n_mels):
+        enorm = 2.0 / (f_pts[j + 2] - f_pts[j])
+        fb[:, j] *= enorm
+
+    fb32 = fb.astype(np.float32)
+
+    # ----- Mel spectrogram = power @ filterbank -----
+    mel = (power @ fb32).astype(np.float32)  # [num_frames, n_mels]
+
+    _save(out_dir / "input.safetensors", {"audio": torch.from_numpy(audio)})
+    # Stash filterbank + window as "weights" so Swift can reuse them if
+    # desired; in practice the Swift impl rebuilds these from parameters.
+    _save(
+        out_dir / "weights.safetensors",
+        {
+            "window": torch.from_numpy(window),
+            "filterbank": torch.from_numpy(fb32),
+        },
+    )
+    _save(out_dir / "expected.safetensors", {"mel": torch.from_numpy(mel)})
+
+
 # ---------------------------------------------------------------------------
 # Dispatch
 # ---------------------------------------------------------------------------
@@ -522,6 +821,12 @@ GENERATORS: Dict[str, Callable[[Path], None]] = {
     "dacvae_encoder_block": gen_dacvae_encoder_block,
     "snac_vq": gen_snac_vq,
     "mimi_rvq": gen_mimi_rvq,
+    # Sortie 16 — DSP numeric-parity fixtures.
+    "dsp_hann": gen_dsp_hann,
+    "dsp_fft": gen_dsp_fft,
+    "dsp_stft": gen_dsp_stft,
+    "dsp_istft": gen_dsp_istft,
+    "dsp_mel": gen_dsp_mel,
 }
 
 

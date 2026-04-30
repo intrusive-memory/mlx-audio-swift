@@ -25,13 +25,56 @@ Swift port must match it bit-for-bit modulo float32 rounding.
 Tests/media/parity/
 ├── _generate.py              # PyTorch reference generator (this directory)
 ├── README.md                 # this file
-├── dsp/                      # short STFT primitive (Sortie 16 will extend this)
+├── dsp/                      # short STFT primitive (Sortie 1 smoke fixture)
 ├── vocos_istft_head/         # Vocos ISTFTHead — gemelo-ai/vocos
 ├── encodec_quantizer/        # Encodec residual VQ — facebookresearch/encodec
 ├── dacvae_encoder_block/     # DAC encoder block — descriptinc/descript-audio-codec
 ├── snac_vq/                  # SNAC VQ — hubertsiuzdak/snac
-└── mimi_rvq/                 # Mimi residual VQ — kyutai-labs/moshi
+├── mimi_rvq/                 # Mimi residual VQ — kyutai-labs/moshi
+├── dsp_hann/                 # Sortie 16 — symmetric Hann window
+├── dsp_fft/                  # Sortie 16 — MLXFFT.rfft vs numpy.fft.rfft
+├── dsp_stft/                 # Sortie 16 — stft() reflect-pad framing
+├── dsp_istft/                # Sortie 16 — MLXFFT.irfft vs numpy.fft.irfft
+└── dsp_mel/                  # Sortie 16 — mel spectrogram (no log scaling)
 ```
+
+### Sortie 16 DSP fixtures — Swift conventions matched
+
+Each Sortie 16 fixture targets one specific Swift entry point and matches
+its numerical convention. Conventions are documented inline in
+`_generate.py`; the summary below cites the Swift source line for each.
+
+| Fixture                | Swift entry point                                          | Convention matched                                         |
+|------------------------|------------------------------------------------------------|-----------------------------------------------------------|
+| `dsp_hann/`            | `hanningWindow(size:)` — `Sources/MLXAudioCore/DSP.swift:19` | numpy.hanning(N) — symmetric, period N-1 (NOT periodic).  |
+| `dsp_fft/`             | `MLXFFT.rfft(...)` — used at `DSP.swift:194`                 | numpy.fft.rfft default ("backward" — no forward scaling).  |
+| `dsp_stft/`            | `stft(audio:window:nFft:hopLength:)` — `DSP.swift:155`        | Reflect-pad by n/2, framed windowed rfft → [frames, freq].|
+| `dsp_istft/`           | `MLXFFT.irfft(...)` — used at `Vocos.swift:116`               | numpy.fft.irfft default (1/N inverse).                    |
+| `dsp_mel/`             | `computeMelSpectrogramAccelerate(... .noScaling)` — `DSP.swift:324` | Reflect-padded power spectrum × Slaney-normalized HTK mel filterbank. |
+
+Tensor keys inside each fixture's `*.safetensors`:
+
+| Fixture        | input.safetensors keys           | weights.safetensors keys           | expected.safetensors keys      |
+|----------------|----------------------------------|------------------------------------|--------------------------------|
+| `dsp_hann/`    | `size` (float32, shape [1])      | `placeholder`                      | `window`                       |
+| `dsp_fft/`     | `audio` (256 samples)            | `placeholder`                      | `spec_real`, `spec_imag`       |
+| `dsp_stft/`    | `audio` (256 samples)            | `window`                           | `spec_real`, `spec_imag`       |
+| `dsp_istft/`   | `spec_real`, `spec_imag`         | `placeholder`                      | `audio`                        |
+| `dsp_mel/`     | `audio` (4096 samples)           | `window`, `filterbank`             | `mel`                          |
+
+Note: safetensors does not natively represent complex floats, so FFT
+fixtures store the real and imaginary parts as two separate float32
+tensors. The Swift test reconstructs the complex array via the existing
+project pattern: `real + MLXArray(real: 0, imaginary: 1) * imag`.
+
+### Resample 48k → 24k — not yet shipped
+
+Sortie 16's task list included a `dsp_resample_48to24` fixture, but
+Swift `Sources/` does not currently expose a `resample` function. Per
+the sortie's production-code-scope discipline ("DO NOT modify ANY
+Sources/ file") the resample fixture and parity test are deferred until
+a Swift resample implementation lands. Sortie 16 reports PARTIAL on
+this single function while shipping parity coverage for the other 5.
 
 Every layer-family directory contains exactly three files:
 
