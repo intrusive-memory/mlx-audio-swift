@@ -1,0 +1,155 @@
+name: Nightly Local-Only Tests
+
+on:
+  schedule:
+    - cron: '0 6 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: nightly-tests
+  cancel-in-progress: false
+
+env:
+  MLXAUDIO_NETWORK_TESTS: "1"
+
+jobs:
+  nightly-local-only:
+    name: Nightly Local-Only Tests
+    runs-on: macos-26
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Show Swift version
+        run: swift --version
+
+      - name: Restore model cache
+        id: model-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/Library/SharedModels
+          key: mlx-models-v2
+
+      - name: Show cached models
+        run: |
+          echo "Cached models:"
+          ls -la ~/Library/SharedModels/ 2>/dev/null || echo "No cache directory found"
+          du -sh ~/Library/SharedModels/*/ 2>/dev/null || echo "No models cached"
+
+      - name: Build for testing
+        run: |
+          xcodebuild build-for-testing \
+            -scheme MLXAudio-Package \
+            -destination 'platform=macOS,arch=arm64' \
+            CODE_SIGNING_ALLOWED=NO \
+            2>&1 | tee build-output.log
+
+      - name: Test SNAC (codec - local-only)
+        run: |
+          xcodebuild test-without-building \
+            -scheme MLXAudio-Package \
+            -destination 'platform=macOS,arch=arm64' \
+            -only-testing:MLXAudioTests/SNACTests \
+            CODE_SIGNING_ALLOWED=NO \
+            2>&1 | tee test-snac-output.log
+
+      - name: Test Mimi (codec - local-only)
+        run: |
+          xcodebuild test-without-building \
+            -scheme MLXAudio-Package \
+            -destination 'platform=macOS,arch=arm64' \
+            -only-testing:MLXAudioTests/MimiTests \
+            CODE_SIGNING_ALLOWED=NO \
+            2>&1 | tee test-mimi-output.log
+
+      - name: Test Qwen3-TTS (local-only)
+        run: |
+          xcodebuild test-without-building \
+            -scheme MLXAudio-Package \
+            -destination 'platform=macOS,arch=arm64' \
+            -only-testing:MLXAudioTests/Qwen3TTSTests \
+            CODE_SIGNING_ALLOWED=NO \
+            2>&1 | tee test-qwen3tts-output.log
+
+      - name: Test LlamaTTS (local-only)
+        run: |
+          xcodebuild test-without-building \
+            -scheme MLXAudio-Package \
+            -destination 'platform=macOS,arch=arm64' \
+            -only-testing:MLXAudioTests/LlamaTTSTests \
+            CODE_SIGNING_ALLOWED=NO \
+            2>&1 | tee test-llamatts-output.log
+
+      - name: Test Soprano TTS (local-only)
+        run: |
+          xcodebuild test-without-building \
+            -scheme MLXAudio-Package \
+            -destination 'platform=macOS,arch=arm64' \
+            -only-testing:MLXAudioTests/SopranoTTSTests \
+            CODE_SIGNING_ALLOWED=NO \
+            2>&1 | tee test-soprano-output.log
+
+      - name: Test PocketTTS (local-only)
+        run: |
+          xcodebuild test-without-building \
+            -scheme MLXAudio-Package \
+            -destination 'platform=macOS,arch=arm64' \
+            -only-testing:MLXAudioTests/PocketTTSTests \
+            CODE_SIGNING_ALLOWED=NO \
+            2>&1 | tee test-pockettts-output.log
+
+      - name: Test Qwen3-TTS Voice Design (local-only)
+        run: |
+          xcodebuild test-without-building \
+            -scheme MLXAudio-Package \
+            -destination 'platform=macOS,arch=arm64' \
+            -only-testing:MLXAudioTests/Qwen3TTSVoiceDesignTests \
+            CODE_SIGNING_ALLOWED=NO \
+            2>&1 | tee test-qwen3tts-voicedesign-output.log
+
+      - name: Test Qwen3 ASR (local-only)
+        run: |
+          xcodebuild test-without-building \
+            -scheme MLXAudio-Package \
+            -destination 'platform=macOS,arch=arm64' \
+            -only-testing:MLXAudioTests/Qwen3ASRTests \
+            CODE_SIGNING_ALLOWED=NO \
+            2>&1 | tee test-qwen3asr-output.log
+
+      - name: Test GLM ASR (local-only)
+        run: |
+          xcodebuild test-without-building \
+            -scheme MLXAudio-Package \
+            -destination 'platform=macOS,arch=arm64' \
+            -only-testing:MLXAudioTests/GLMASRTests \
+            CODE_SIGNING_ALLOWED=NO \
+            2>&1 | tee test-glmasr-output.log
+
+      - name: Test Marvis TTS Generate (local-only)
+        run: |
+          xcodebuild test-without-building \
+            -scheme MLXAudio-Package \
+            -destination 'platform=macOS,arch=arm64' \
+            -only-testing:MLXAudioTests/MarvisTTSGenerateTests \
+            CODE_SIGNING_ALLOWED=NO \
+            2>&1 | tee test-marvis-output.log
+
+      - name: Upload nightly test output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-test-output
+          path: |
+            build-output.log
+            test-snac-output.log
+            test-mimi-output.log
+            test-qwen3tts-output.log
+            test-llamatts-output.log
+            test-soprano-output.log
+            test-pockettts-output.log
+            test-qwen3tts-voicedesign-output.log
+            test-qwen3asr-output.log
+            test-glmasr-output.log
+            test-marvis-output.log
+          retention-days: 14

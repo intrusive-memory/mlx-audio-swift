@@ -33,6 +33,9 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Check local-only suite list completeness
+        run: bash bin/check-local-only-suites.sh
+
       - name: Check for new TODOs/FIXMEs
         run: |
           echo "Checking for TODO/FIXME in Sources/..."
