@@ -144,6 +144,17 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             2>&1 | tee test-deterministic-output.log
 
+      - name: Test KV Cache Correctness (local-only)
+        env:
+          MLXAUDIO_NIGHTLY_RUN: "1"
+        run: |
+          xcodebuild test-without-building \
+            -scheme MLXAudio-Package \
+            -destination 'platform=macOS,arch=arm64' \
+            -only-testing:MLXAudioTests/KVCacheCorrectnessTests \
+            CODE_SIGNING_ALLOWED=NO \
+            2>&1 | tee test-kvcache-output.log
+
       - name: Upload nightly test output
         if: always()
         uses: actions/upload-artifact@v4
@@ -162,4 +173,5 @@ jobs:
             test-glmasr-output.log
             test-marvis-output.log
             test-deterministic-output.log
+            test-kvcache-output.log
           retention-days: 14

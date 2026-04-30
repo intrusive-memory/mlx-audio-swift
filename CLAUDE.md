@@ -97,6 +97,7 @@ nightly workflow (`.github/workflows/nightly-tests.yaml`, Sortie 9).
 | `GLMASRTests` | GLM-ASR | Downloads GLM-ASR model |
 | `MarvisTTSGenerateTests` | Marvis TTS (CSM / Sesame) | Downloads Marvis-AI/marvis-tts-250m-v0.2-MLX-8bit + Mimi codec |
 | `DeterministicGenerationTests` | Qwen3TTS, LlamaTTS, SopranoTTS, PocketTTS | Downloads all four models; asserts reproducible token-id sequences (Sortie 21). Fixtures in `Tests/media/deterministic/` are placeholders until regenerated locally. PocketTTS is PARTIAL (flow-matching model has no discrete token IDs; uses audio sample-count proxy). |
+| `KVCacheCorrectnessTests` | LlamaTTS (full), Qwen3ASR (PARTIAL) | KV cache correctness: asserts single-shot and prefill+decode logits match within `atol: 1e-4` (Sortie 22). LlamaTTS test is FULL (public API sufficient). Qwen3ASR test is PARTIAL — `mergeAudioFeatures` is private; stub skips gracefully with documented API gap. Nightly run requires `MLXAUDIO_NIGHTLY_RUN=1` env var (set by nightly workflow). CI-safe promotion deferred — synthetic small-config benchmark not yet validated. |
 
 To run a single local-only suite:
   ```bash
