@@ -41,11 +41,6 @@ import tempfile
 from pathlib import Path
 
 try:
-    from huggingface_hub import hf_hub_download
-except ImportError:
-    sys.exit("ERROR: huggingface_hub is required.  Run: pip install huggingface_hub")
-
-try:
     from tokenizers import Tokenizer
 except ImportError:
     sys.exit("ERROR: tokenizers is required.  Run: pip install tokenizers")
@@ -56,8 +51,13 @@ except ImportError:
 
 HF_REPO_ID    = "mlx-community/pocket-tts"
 HF_FILENAME   = "tokenizer.json"
-# Cache inside /tmp so the vocab file is NEVER committed to the repo.
+# Cache inside /tmp — only used when the committed vocab file is absent.
 HF_CACHE_DIR  = os.path.join(tempfile.gettempdir(), "mlxaudio_parity_tokenizer_cache")
+
+# Committed vocab file (byte_fallback already patched to true).
+# Phase B committed this file alongside the reference JSON so regeneration
+# is reproducible without a network call.
+COMMITTED_VOCAB = Path(__file__).parent / "tokenizer.json"
 
 OUTPUT_DIR    = Path(__file__).parent
 OUTPUT_FILE   = OUTPUT_DIR / "unigram_reference.json"
@@ -101,19 +101,46 @@ TEST_CASES: list[tuple[str, str]] = [
 # ---------------------------------------------------------------------------
 
 def load_byte_fallback_tokenizer(repo_id: str, filename: str, cache_dir: str) -> tuple[Tokenizer, list[str]]:
-    """Download tokenizer.json and return a Tokenizer with byte_fallback=True.
+    """Return a Tokenizer with byte_fallback=True, plus the raw vocab list.
 
-    The upstream file has byte_fallback=False; we patch it to True to match
-    the Swift UnigramTokenizer behaviour (which always uses byte fallback).
+    Source priority:
+      1. COMMITTED_VOCAB (Tests/media/parity/tokenizer/tokenizer.json) — already
+         patched and committed by Phase B.  No network call needed.
+      2. HuggingFace Hub download — fallback when the committed file is absent
+         (e.g. fresh checkout before the vocab file existed).  Patches
+         byte_fallback=True before loading.
     """
+    if COMMITTED_VOCAB.exists():
+        print(f"Using committed vocab file: {COMMITTED_VOCAB}")
+        with open(COMMITTED_VOCAB, encoding="utf-8") as fh:
+            tok_dict = json.load(fh)
+        # Already patched — byte_fallback should be True.
+        assert tok_dict["model"].get("byte_fallback") is True, (
+            "Committed tokenizer.json has byte_fallback != True — was it overwritten?"
+        )
+        vocab: list[str] = [entry[0] for entry in tok_dict["model"]["vocab"]]
+        tokenizer = Tokenizer.from_file(str(COMMITTED_VOCAB))
+        return tokenizer, vocab
+
+    # Fallback: download from HuggingFace Hub.
+    try:
+        from huggingface_hub import hf_hub_download
+    except ImportError:
+        sys.exit(
+            "ERROR: huggingface_hub is required for the network fallback path.\n"
+            "Run: pip install huggingface_hub\n"
+            "Or commit the vocab file at: Tests/media/parity/tokenizer/tokenizer.json"
+        )
+
+    print(f"Committed vocab not found — downloading from {repo_id} …")
     tok_path = hf_hub_download(repo_id=repo_id, filename=filename, cache_dir=cache_dir)
     with open(tok_path, encoding="utf-8") as fh:
         tok_dict = json.load(fh)
 
     # Extract vocab list for Swift-decode simulation
-    vocab: list[str] = [entry[0] for entry in tok_dict["model"]["vocab"]]
+    vocab = [entry[0] for entry in tok_dict["model"]["vocab"]]
 
-    # Patch byte_fallback
+    # Patch byte_fallback to match Swift behaviour
     patched = copy.deepcopy(tok_dict)
     patched["model"]["byte_fallback"] = True
 
@@ -164,7 +191,7 @@ def swift_decode(ids: list[int], vocab: list[str]) -> str:
 # ---------------------------------------------------------------------------
 
 def main() -> None:
-    print(f"Downloading tokenizer from {HF_REPO_ID} …")
+    print(f"Loading tokenizer (committed file or {HF_REPO_ID} fallback) …")
     tokenizer, vocab = load_byte_fallback_tokenizer(HF_REPO_ID, HF_FILENAME, HF_CACHE_DIR)
     print(f"Vocab size: {len(vocab)}")
 

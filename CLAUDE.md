@@ -46,6 +46,7 @@ Read and follow all instructions in [AGENTS.md](AGENTS.md) before starting any t
     -only-testing:MLXAudioTests/MimiLayerTests \
     -only-testing:MLXAudioTests/SNACVQTests \
     -only-testing:MLXAudioTests/DACVAEWatermarkerTests \
+    -only-testing:MLXAudioTests/UnigramTokenizerRoundTripTests \
     CODE_SIGNING_ALLOWED=NO
   ```
 
