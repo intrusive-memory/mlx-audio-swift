@@ -43,3 +43,30 @@ Read and follow all instructions in [AGENTS.md](AGENTS.md) before starting any t
     -only-testing:MLXAudioTests/MarvisTTSModuleSetupTests \
     CODE_SIGNING_ALLOWED=NO
   ```
+
+## Local-Only Test Suites (require model downloads — NOT in CI-safe list above)
+
+These suites require multi-GB model files from the `mlx-models-v2` cache
+(`~/Library/SharedModels`). They are intentionally excluded from the CI-safe
+`make test` / `xcodebuild test` block above. Run them locally or in the
+nightly workflow (`.github/workflows/nightly-tests.yaml`, Sortie 9).
+
+| Suite | Model family | Notes |
+|-------|-------------|-------|
+| `SNACTests` | SNAC codec | Downloads SNAC model weights |
+| `MimiTests` | Mimi codec | Downloads Mimi model weights |
+| `Qwen3TTSTests` | Qwen3-TTS | Downloads Qwen3-TTS model |
+| `LlamaTTSTests` | LlamaTTS (Orpheus) | Downloads orpheus-3b model |
+| `SopranoTTSTests` | Soprano TTS | Downloads Soprano model |
+| `PocketTTSTests` | PocketTTS | Downloads PocketTTS model |
+| `Qwen3TTSVoiceDesignTests` | Qwen3-TTS voice design | Downloads Qwen3-TTS model |
+| `Qwen3ASRTests` | Qwen3-ASR | Downloads Qwen3-ASR model |
+| `GLMASRTests` | GLM-ASR | Downloads GLM-ASR model |
+| `MarvisTTSGenerateTests` | Marvis TTS (CSM / Sesame) | Downloads Marvis-AI/marvis-tts-250m-v0.2-MLX-8bit + Mimi codec |
+
+To run a single local-only suite:
+  ```bash
+  xcodebuild test -scheme MLXAudio-Package -destination 'platform=macOS' \
+    -only-testing:MLXAudioTests/MarvisTTSGenerateTests \
+    CODE_SIGNING_ALLOWED=NO
+  ```
