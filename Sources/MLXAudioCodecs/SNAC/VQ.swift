@@ -103,12 +103,10 @@ public class VectorQuantize: Module {
 
         let codebookWeights = codebook.weight  // codebook: (N x D)
 
-        let encodingsNorm = normalize(encodings)
-        let codebookNorm = normalize(codebookWeights)
-
-        let dist = sum(pow(encodingsNorm, MLXArray(2)), axis: 1, keepDims: true)
-            - 2 * matmul(encodingsNorm, codebookNorm.T)
-            + sum(pow(codebookNorm, MLXArray(2)), axis: 1, keepDims: true).T
+        // Compute raw L2 distance (not cosine) — matches upstream Python SNAC
+        let dist = sum(pow(encodings, MLXArray(2)), axis: 1, keepDims: true)
+            - 2 * matmul(encodings, codebookWeights.T)
+            + sum(pow(codebookWeights, MLXArray(2)), axis: 1, keepDims: true).T
 
         let minDist = argMax(-dist, axis: 1)
 

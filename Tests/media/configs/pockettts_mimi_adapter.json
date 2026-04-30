@@ -1,0 +1,35 @@
+{
+    "dtype": "bfloat16",
+    "sample_rate": 24000,
+    "channels": 1,
+    "frame_rate": 12.5,
+    "seanet": {
+        "dimension": 512,
+        "channels": 1,
+        "n_filters": 64,
+        "n_residual_layers": 1,
+        "ratios": [8, 6, 5, 4],
+        "kernel_size": 7,
+        "residual_kernel_size": 3,
+        "last_kernel_size": 3,
+        "dilation_base": 2,
+        "pad_mode": "constant",
+        "compress": 2
+    },
+    "transformer": {
+        "d_model": 512,
+        "input_dimension": 512,
+        "output_dimensions": [512],
+        "num_heads": 8,
+        "num_layers": 8,
+        "layer_scale": 0.01,
+        "context": 250,
+        "dim_feedforward": 2048,
+        "max_period": 10000.0
+    },
+    "quantizer": {
+        "dimension": 256,
+        "output_dimension": 1024
+    },
+    "weights_path": "mimi.safetensors"
+}
