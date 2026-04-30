@@ -319,17 +319,8 @@ struct VocosTests {
     // Config derived from fixture shapes:
     //   dim=16, n_fft=32 (proj output = n_fft+2 = 34), hop_length=8.
     //
-    // KNOWN DEVIATION: Python uses torch.hann_window(n_fft=32, periodic=True).
-    // Swift ISTFTHead.performISTFT always calls its own hanningWindow(length:)
-    // which produces a SYMMETRIC Hann window (0.5 - 0.5*cos(2π*k/(N-1))).
-    // Periodic and symmetric Hann windows differ at every point except the
-    // boundaries. Since performISTFT is private, the window cannot be injected.
-    //
-    // This test will FAIL with allClose(atol: 1e-4) if the window mismatch
-    // causes a numerical difference above tolerance. The failure is a genuine
-    // finding (Swift uses wrong Hann variant for ISTFT), not a test bug.
-    // Per Sortie 19 discipline: the allClose assertion is kept at 1e-4; the
-    // finding is reported in the Sortie 19 report.
+    // ISTFTHead uses a periodic Hann window (0.5 - 0.5*cos(2π*k/N)) matching
+    // torch.hann_window(periodic=True), and always preserves the batch dimension.
 
     @Test func vocosISTFTHeadMatchesPythonReference() throws {
         let fixture = try loadParityFixture("vocos_istft_head")
@@ -387,16 +378,12 @@ struct VocosTests {
         )
 
         // --- Numeric-parity assertion ---
-        // NOTE: This assertion is expected to FAIL due to the window mismatch
-        // described in the comment above (periodic vs symmetric Hann window).
-        // The failure is a finding about the Swift implementation, not a test
-        // authoring error. See Sortie 19 report.
         let close = MLX.allClose(swiftAudio, expectedAudio, rtol: 1e-4, atol: 1e-4)
         let isClose = close.item(Bool.self)
 
         if !isClose {
             let maxAbsErr = abs(swiftAudio - expectedAudio).max().item(Float.self)
-            Issue.record("ISTFTHead audio != Python reference. max_abs_err=\(maxAbsErr) (atol=1e-4, rtol=1e-4). KNOWN CAUSE: Swift uses symmetric Hann window; Python uses periodic Hann window.")
+            Issue.record("ISTFTHead audio != Python reference. max_abs_err=\(maxAbsErr) (atol=1e-4, rtol=1e-4)")
         }
         #expect(isClose, "vocosISTFTHeadMatchesPythonReference: allClose failed (atol=1e-4, rtol=1e-4)")
     }
