@@ -16,6 +16,7 @@ Read and follow all instructions in [AGENTS.md](AGENTS.md) before starting any t
     -only-testing:MLXAudioTests/EncodecTests \
     -only-testing:MLXAudioTests/DACVAETests \
     -only-testing:MLXAudioTests/GLMASRModuleSetupTests \
+    -only-testing:MLXAudioTests/GLMASRModelTests \
     -only-testing:MLXAudioTests/Qwen3ASRModuleSetupTests \
     -only-testing:MLXAudioTests/ForceAlignProcessorTests \
     -only-testing:MLXAudioTests/ForcedAlignResultTests \
