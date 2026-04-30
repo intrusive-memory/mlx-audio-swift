@@ -36,36 +36,24 @@ struct SNACTests {
     @Test func testSNACEncodeDecodeCycle() async throws {
         // 1. Load audio from file
         let audioURL = Bundle.module.url(forResource: "intention", withExtension: "wav", subdirectory: "media")!
-        let (sampleRate, audioData) = try loadAudioArray(from: audioURL)
-        print("Loaded audio: \(audioData.shape), sample rate: \(sampleRate)")
+        let (_, audioData) = try loadAudioArray(from: audioURL)
 
         // 2. Load SNAC model from HuggingFace (24kHz model)
-        print("\u{001B}[33mLoading SNAC model...\u{001B}[0m")
         let snac = try await SNAC.fromPretrained("mlx-community/snac_24khz")
-        print("\u{001B}[32mSNAC model loaded!\u{001B}[0m")
 
         // 3. Reshape audio for SNAC: [batch, channels, samples]
         let audioInput = audioData.reshaped([1, 1, audioData.shape[0]])
-        print("Audio input shape: \(audioInput.shape)")
 
         // 4. Encode audio to codes
-        print("\u{001B}[33mEncoding audio...\u{001B}[0m")
         let codes = snac.encode(audioInput)
-        print("Encoded to \(codes.count) codebook levels:")
-        for (i, code) in codes.enumerated() {
-            print("  Level \(i): \(code.shape)")
-        }
 
         // 5. Decode codes back to audio
-        print("\u{001B}[33mDecoding audio...\u{001B}[0m")
         let reconstructed = snac.decode(codes)
-        print("Reconstructed audio shape: \(reconstructed.shape)")
 
         // 6. Save reconstructed audio to the same media folder as input
         let outputURL = audioURL.deletingLastPathComponent().appendingPathComponent("intention_snac_reconstructed.wav")
         let outputAudio = reconstructed.squeezed()  // Remove batch/channel dims
         try saveAudioArray(outputAudio, sampleRate: Double(snac.samplingRate), to: outputURL)
-        print("\u{001B}[32mSaved reconstructed audio to\u{001B}[0m: \(outputURL.path)")
 
         // Basic check: output should have samples
         #expect(reconstructed.shape.last! > 0)
@@ -86,36 +74,25 @@ struct MimiTests {
     @Test func testMimiEncodeDecodeCycle() async throws {
         // 1. Load audio from file
         let audioURL = Bundle.module.url(forResource: "intention", withExtension: "wav", subdirectory: "media")!
-        let (sampleRate, audioData) = try loadAudioArray(from: audioURL)
-        print("Loaded audio: \(audioData.shape), sample rate: \(sampleRate)")
+        let (_, audioData) = try loadAudioArray(from: audioURL)
 
         // 2. Load Mimi model from HuggingFace
-        print("\u{001B}[33mLoading Mimi model...\u{001B}[0m")
-        let mimi = try await Mimi.fromPretrained(progressHandler: { progress in
-            print("Download progress: \(progress.fractionCompleted * 100)%")
-        })
-        print("\u{001B}[32mMimi model loaded!\u{001B}[0m")
+        let mimi = try await Mimi.fromPretrained()
 
         // 3. Reshape audio for Mimi: [batch, channels, samples]
         let audioInput = audioData.reshaped([1, 1, audioData.shape[0]])
-        print("Audio input shape: \(audioInput.shape)")
 
         // 4. Encode audio to codes
-        print("\u{001B}[33mEncoding audio...\u{001B}[0m")
         let codes = mimi.encode(audioInput)
-        print("Encoded to codes shape: \(codes.shape)")
 
         // 5. Decode codes back to audio
-        print("\u{001B}[33mDecoding audio...\u{001B}[0m")
         let reconstructed = mimi.decode(codes)
         GPU.clearCache()
-        print("Reconstructed audio shape: \(reconstructed.shape)")
 
         // 6. Save reconstructed audio
         let outputURL = audioURL.deletingLastPathComponent().appendingPathComponent("intention_mimi_reconstructed.wav")
         let outputAudio = reconstructed.squeezed()  // Remove batch/channel dims
         try saveAudioArray(outputAudio, sampleRate: mimi.sampleRate, to: outputURL)
-        print("\u{001B}[32mSaved reconstructed audio to\u{001B}[0m: \(outputURL.path)")
 
         // Basic check: output should have samples
         #expect(reconstructed.shape.last! > 0)
@@ -150,7 +127,6 @@ struct VocosTests {
 
         // Output should have same shape as input (residual connection)
         #expect(output.shape == input.shape)
-        print("ConvNeXtBlock output shape: \(output.shape)")
     }
 
     @Test func testConvNeXtBlockWithAdaNorm() throws {
@@ -175,7 +151,6 @@ struct VocosTests {
 
         // Output should have same shape as input
         #expect(output.shape == input.shape)
-        print("ConvNeXtBlock with AdaNorm output shape: \(output.shape)")
     }
 
     @Test func testVocosBackbone() throws {
@@ -200,7 +175,6 @@ struct VocosTests {
         #expect(output.shape[0] == 1)
         #expect(output.shape[1] == 50)
         #expect(output.shape[2] == dim)
-        print("VocosBackbone output shape: \(output.shape)")
     }
 
     @Test func testVocosBackboneWithAdaNorm() throws {
@@ -229,7 +203,6 @@ struct VocosTests {
         #expect(output.shape[0] == 1)
         #expect(output.shape[1] == 50)
         #expect(output.shape[2] == dim)
-        print("VocosBackbone with AdaNorm output shape: \(output.shape)")
     }
 
     @Test func testISTFTHead() throws {
@@ -249,7 +222,6 @@ struct VocosTests {
         // Output should be audio waveform
         // Expected length: approximately (numFrames - 1) * hopLength after trimming
         #expect(output.ndim == 1 || output.ndim == 2)
-        print("ISTFTHead output shape: \(output.shape)")
     }
 
     @Test func testAdaLayerNorm() throws {
@@ -270,7 +242,6 @@ struct VocosTests {
 
         // Output should have same shape as input
         #expect(output.shape == input.shape)
-        print("AdaLayerNorm output shape: \(output.shape)")
     }
 
     @Test func testVocosModel() throws {
@@ -300,7 +271,6 @@ struct VocosTests {
         let output = vocos(input)
 
         // Output should be audio waveform
-        print("Vocos output shape: \(output.shape)")
         #expect(output.shape.count >= 1)
     }
 
@@ -334,7 +304,6 @@ struct VocosTests {
         let output = vocos.decode(input, bandwidthId: bandwidthId)
 
         // Output should be audio waveform
-        print("Vocos decode with bandwidthId output shape: \(output.shape)")
         #expect(output.shape.count >= 1)
     }
 
@@ -456,8 +425,6 @@ struct EncodecTests {
         #expect(config.numLstmLayers == 2)
         #expect(config.samplingRate == 24000)
         #expect(config.upsamplingRatios == [8, 5, 4, 2])
-
-        print("EncodecConfig default values verified")
     }
 
     @Test func testEncodecConv1d() throws {
@@ -476,7 +443,6 @@ struct EncodecTests {
 
         #expect(output.shape[0] == 1)
         #expect(output.shape[2] == 64)
-        print("EncodecConv1d output shape: \(output.shape)")
     }
 
     @Test func testEncodecLSTM() throws {
@@ -490,7 +456,6 @@ struct EncodecTests {
         #expect(output.shape[0] == 1)
         #expect(output.shape[1] == 50)
         #expect(output.shape[2] == 64)
-        print("EncodecLSTM output shape: \(output.shape)")
     }
 
     @Test func testEncodecResnetBlock() throws {
@@ -508,7 +473,6 @@ struct EncodecTests {
 
         // Output should have same shape (residual connection)
         #expect(output.shape == input.shape)
-        print("EncodecResnetBlock output shape: \(output.shape)")
     }
 
     @Test func testEncodecEuclideanCodebook() throws {
@@ -522,14 +486,12 @@ struct EncodecTests {
 
         #expect(indices.shape[0] == 1)
         #expect(indices.shape[1] == 50)
-        print("EncodecEuclideanCodebook indices shape: \(indices.shape)")
 
         // Decode back
         let decoded = codebook.decode(indices)
         #expect(decoded.shape[0] == 1)
         #expect(decoded.shape[1] == 50)
         #expect(decoded.shape[2] == config.codebookDim)
-        print("EncodecEuclideanCodebook decoded shape: \(decoded.shape)")
     }
 
     @Test func testEncodecRVQ() throws {
@@ -543,13 +505,11 @@ struct EncodecTests {
 
         // Codes shape should be (batch, num_quantizers, length)
         #expect(codes.shape[0] == 1)
-        print("EncodecRVQ codes shape: \(codes.shape)")
 
         // Decode
         let decoded = rvq.decode(codes)
         #expect(decoded.shape[0] == 1)
         #expect(decoded.shape[1] == 50)
-        print("EncodecRVQ decoded shape: \(decoded.shape)")
     }
 
     @Test func testEncodecModel() throws {
@@ -562,12 +522,10 @@ struct EncodecTests {
 
         // Encode
         let (codes, scales) = model.encode(audio, bandwidth: 1.5)
-        print("Encodec codes shape: \(codes.shape)")
         #expect(codes.shape[0] >= 1)
 
         // Decode
         let decoded = model.decode(codes, scales)
-        print("Encodec decoded shape: \(decoded.shape)")
         #expect(decoded.shape[0] == 1)
         #expect(decoded.shape[2] == 1)
     }
@@ -697,8 +655,6 @@ struct DACVAETests {
         #expect(config.codebookDim == 128)
         #expect(config.sampleRate == 48000)
         #expect(config.hopLength == 1920)  // 2 * 8 * 10 * 12
-
-        print("DACVAEConfig default values verified")
     }
 
     @Test func testDACVAESnake1d() throws {
@@ -712,7 +668,6 @@ struct DACVAETests {
 
         // Output should have same shape
         #expect(output.shape == input.shape)
-        print("DACVAESnake1d output shape: \(output.shape)")
     }
 
     @Test func testDACVAEWNConv1d() throws {
@@ -730,7 +685,6 @@ struct DACVAETests {
 
         #expect(output.shape[0] == 1)
         #expect(output.shape[2] == 64)
-        print("DACVAEWNConv1d output shape: \(output.shape)")
     }
 
     @Test func testDACVAEResidualUnit() throws {
@@ -745,7 +699,6 @@ struct DACVAETests {
         // Output should have similar shape (may differ slightly due to padding)
         #expect(output.shape[0] == 1)
         #expect(output.shape[2] == dim)
-        print("DACVAEResidualUnit output shape: \(output.shape)")
     }
 
     @Test func testDACVAEEncoderBlock() throws {
@@ -759,7 +712,6 @@ struct DACVAETests {
 
         #expect(output.shape[0] == 1)
         #expect(output.shape[2] == dim)
-        print("DACVAEEncoderBlock output shape: \(output.shape)")
     }
 
     @Test func testDACVAEEncoder() throws {
@@ -776,7 +728,6 @@ struct DACVAETests {
 
         #expect(output.shape[0] == 1)
         #expect(output.shape[2] == 128)
-        print("DACVAEEncoder output shape: \(output.shape)")
     }
 
     @Test func testDACVAEQuantizerProj() throws {
@@ -791,7 +742,6 @@ struct DACVAETests {
         // Should project to 2*outDim (mean + logvar)
         #expect(projected.shape[0] == 1)
         #expect(projected.shape[2] == 128)  // 64 * 2
-        print("DACVAEQuantizerInProj output shape: \(projected.shape)")
 
         // Take mean (first half)
         let mean = MLXRandom.normal([1, 50, 64])
@@ -799,7 +749,6 @@ struct DACVAETests {
 
         #expect(unprojected.shape[0] == 1)
         #expect(unprojected.shape[2] == 128)
-        print("DACVAEQuantizerOutProj output shape: \(unprojected.shape)")
     }
 
     @Test func testDACVAEModel() throws {
@@ -819,13 +768,11 @@ struct DACVAETests {
 
         // Encode to codebook space
         let encoded = model(audio)
-        print("DACVAE encoded shape: \(encoded.shape)")
         #expect(encoded.shape[0] == 1)
         #expect(encoded.shape[1] == config.codebookDim)
 
         // Decode back to audio
         let decoded = model.decode(encoded)
-        print("DACVAE decoded shape: \(decoded.shape)")
         #expect(decoded.shape[0] == 1)
         #expect(decoded.shape[2] == 1)
     }
@@ -837,8 +784,6 @@ struct DACVAETests {
 
         let config2 = DACVAEConfig(encoderRates: [2, 8, 10, 12])
         #expect(config2.hopLength == 1920)  // 2 * 8 * 10 * 12
-
-        print("DACVAEConfig hopLength verified")
     }
 
     // MARK: - dacvaeEncoderBlockMatchesPythonReference
@@ -1035,10 +980,7 @@ struct ComponentDescriptorTests {
 
         // Verify SNAC 24kHz component is registered
         let snacComponentId = SNACModelRepo.snac24kHz.componentId
-        print("SNAC component ID: \(snacComponentId)")
-
         #expect(snacComponentId == "snac-24khz", "SNAC component ID should be 'snac-24khz'")
-        print("✓ SNAC 24kHz component registered successfully")
     }
 
     @Test func testSNACComponentMetadata() {
@@ -1046,10 +988,7 @@ struct ComponentDescriptorTests {
         SNAC.ensureComponentsRegistered()
 
         let displayName = SNACModelRepo.snac24kHz.displayName
-        print("SNAC display name: \(displayName)")
-
         #expect(displayName == "SNAC 24 kHz Audio Codec", "Display name should match")
-        print("✓ SNAC component metadata verified")
     }
 
     @Test func testMimiComponentRegistration() {
@@ -1058,10 +997,7 @@ struct ComponentDescriptorTests {
 
         // Verify Mimi PyTorch BF16 component is registered
         let mimiComponentId = MimiModelRepo.mimiPyTorchBF16.componentId
-        print("Mimi component ID: \(mimiComponentId)")
-
         #expect(mimiComponentId == "mimi-pytorch-bf16", "Mimi component ID should be 'mimi-pytorch-bf16'")
-        print("✓ Mimi PyTorch BF16 component registered successfully")
     }
 
     @Test func testMimiComponentMetadata() {
@@ -1069,10 +1005,7 @@ struct ComponentDescriptorTests {
         Mimi.ensureComponentsRegistered()
 
         let displayName = MimiModelRepo.mimiPyTorchBF16.displayName
-        print("Mimi display name: \(displayName)")
-
         #expect(displayName == "Mimi Audio Codec (PyTorch BF16)", "Display name should match")
-        print("✓ Mimi component metadata verified")
     }
 
     @Test func testSNACComponentRepositoryId() {
@@ -1080,10 +1013,7 @@ struct ComponentDescriptorTests {
         SNAC.ensureComponentsRegistered()
 
         let repoId = SNACModelRepo.snac24kHz.rawValue
-        print("SNAC repository ID: \(repoId)")
-
         #expect(repoId == "mlx-community/snac_24khz", "SNAC should use mlx-community/snac_24khz repo")
-        print("✓ SNAC repository ID verified")
     }
 
     @Test func testMimiComponentRepositoryId() {
@@ -1091,10 +1021,7 @@ struct ComponentDescriptorTests {
         Mimi.ensureComponentsRegistered()
 
         let repoId = MimiModelRepo.mimiPyTorchBF16.rawValue
-        print("Mimi repository ID: \(repoId)")
-
         #expect(repoId == "kyutai/moshiko-pytorch-bf16", "Mimi should use kyutai/moshiko-pytorch-bf16 repo")
-        print("✓ Mimi repository ID verified")
     }
 
     @Test func testSNACComponentType() {
@@ -1104,10 +1031,7 @@ struct ComponentDescriptorTests {
         // The component type is .decoder as specified in SNACModelManager
         // This test verifies the constant is correct at runtime
         let componentType = "decoder"  // From ComponentDescriptor(type: .decoder, ...)
-        print("SNAC component type: \(componentType)")
-
         #expect(componentType == "decoder", "SNAC should be a decoder component")
-        print("✓ SNAC component type verified as decoder")
     }
 
     @Test func testMimiComponentType() {
@@ -1117,10 +1041,7 @@ struct ComponentDescriptorTests {
         // The component type is .decoder as specified in MimiModelManager
         // This test verifies the constant is correct at runtime
         let componentType = "decoder"  // From ComponentDescriptor(type: .decoder, ...)
-        print("Mimi component type: \(componentType)")
-
         #expect(componentType == "decoder", "Mimi should be a decoder component")
-        print("✓ Mimi component type verified as decoder")
     }
 
     @Test func testBothComponentsCanBeRegisteredTogether() {
@@ -1135,9 +1056,5 @@ struct ComponentDescriptorTests {
         #expect(!snacId.isEmpty, "SNAC component ID should not be empty")
         #expect(!mimiId.isEmpty, "Mimi component ID should not be empty")
         #expect(snacId != mimiId, "Component IDs should be unique")
-
-        print("✓ Both SNAC and Mimi components registered without conflicts")
-        print("  SNAC ID: \(snacId)")
-        print("  Mimi ID: \(mimiId)")
     }
 }
