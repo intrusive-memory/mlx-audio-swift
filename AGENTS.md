@@ -41,6 +41,7 @@ xcodebuild test -scheme MLXAudio-Package -destination 'platform=macOS' \
   -only-testing:MLXAudioTests/Qwen3TTSPrepareICLInputsTests \
   -only-testing:MLXAudioTests/Qwen3TTSGenerateICLTests \
   -only-testing:MLXAudioTests/Qwen3TTSSpeakerEncoderSmokeTests \
+  -only-testing:MLXAudioTests/LlamaTTSModuleSetupTests \
   CODE_SIGNING_ALLOWED=NO
 ```
 

@@ -35,5 +35,6 @@ Read and follow all instructions in [AGENTS.md](AGENTS.md) before starting any t
     -only-testing:MLXAudioTests/Qwen3TTSPrepareICLInputsTests \
     -only-testing:MLXAudioTests/Qwen3TTSGenerateICLTests \
     -only-testing:MLXAudioTests/Qwen3TTSSpeakerEncoderSmokeTests \
+    -only-testing:MLXAudioTests/LlamaTTSModuleSetupTests \
     CODE_SIGNING_ALLOWED=NO
   ```
