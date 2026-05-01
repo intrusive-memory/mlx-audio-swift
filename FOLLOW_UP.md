@@ -6,23 +6,22 @@ Source: `docs/complete/echo-dragnet-01-brief.md` § Section 3.
 
 ---
 
-## P0 — `AudioUtils.saveAudioArray` silent 1024-sample truncation
+## P0 — `AudioUtils` 1024-frame round-trip truncation — **RESOLVED in `5724250`**
 
-**Status:** open
-**Blast radius:** Every caller of the public audio-save API loses up to ~42 ms of trailing audio (≤1023 samples short of the next 1024-frame boundary). Silent. No error, no warning.
-**Evidence:** `Tests/AudioIORoundTripTests.swift:28-42`. `intention.wav` 36480 → 35840 samples (= 35×1024) on round-trip.
-**Likely cause:** `AVAudioFile`'s internal 1024-frame I/O buffer doesn't flush its trailing partial buffer before ARC releases the local `let audioFile` in `Sources/MLXAudioCore/AudioUtils.swift:66-86`. The same project's `StreamingWAVWriter.finalize()` (line 145) already uses `audioFile = nil` to force this — the pattern just wasn't applied to the one-shot variant.
+**Original diagnosis (Sortie 14):** silent truncation in `saveAudioArray`. Wrong.
 
-### TODO
+**Actual diagnosis:** the bug was on the READ side, not the write side. `AVAudioFile.read(into:)` silently fills only part of the buffer for non-1024-aligned WAV file lengths, regardless of whether you use the 1-arg or 2-arg variant. Standalone repro confirmed:
+- Hand-rolled WAV writer produces a byte-exact 145964-byte file
+- `AVAudioFile.length` parses the file as 36480 frames
+- `AVAudioFile.read(into:)` returns with `buffer.frameLength = 35829` despite buffer capacity 36480
 
-- [ ] Reproduce with the existing `intentionWav_loadSaveReload_float32Allclose` test by removing the `withKnownIssue` wrapper.
-- [ ] Try the 1-line fix: change `let audioFile` → `var audioFile` and add `audioFile = nil` after `try audioFile.write(from: buffer)` in `Sources/MLXAudioCore/AudioUtils.swift:66`. Re-run the round-trip test and assert `MLX.allclose(atol: 1e-6)` on byte counts AND samples.
-- [ ] **If the 1-line fix doesn't make round-trip byte-exact**, replace `AVAudioFile` with a direct WAV writer using `Data` + RIFF header (~50 lines). The existing `loadAudioArray` parses raw WAV — use it as a format reference.
-- [ ] Remove `withKnownIssue` from `Tests/AudioIORoundTripTests.swift`. Convert the documented finding-comment into a confirmation that it's fixed.
-- [ ] Run `make test` — should still be 219+/total PASS.
+**Fix (commit `5724250`):**
+- Added a hand-rolled RIFF/WAVE parser as a fast path in `loadAudioArray` (`Sources/MLXAudioCore/AudioUtils.swift`). Handles Int16 PCM, Int32 PCM, IEEE float at 16/32-bit. Non-WAV containers fall back to AVAudioFile.
+- `saveAudioArray` is unchanged — its output was byte-exact all along; AVAudioFile was dropping samples on read-back.
+- `Tests/AudioIORoundTripTests.swift`: removed `withKnownIssue` wrapper. Asserts byte-exact sample count and full-range allclose at `atol=1e-6` on `intention.wav` round-trip.
+- `make test`: 219/219 PASS.
 
-**Cost:** 30 min for the 1-line attempt, +1-2 hours if direct WAV writer is needed.
-**Model:** sonnet (numerical edge cases warrant care).
+**Carry forward:** the Sortie 14 finding's framing — "saveAudioArray silently truncates" — was a misdiagnosis that survived through the brief and into this FOLLOW_UP. The original investigator only verified the round-trip output, not which leg of it was wrong. Future bug intake should require root-cause isolation (a standalone read-side OR write-side test), not just round-trip evidence. Add this lesson to the Echo Dragnet brief's process-discoveries when next consulted.
 
 ---
 
