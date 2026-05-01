@@ -150,15 +150,27 @@ public class DACVAEFullDecoder: Module {
     }
 
     /// Decode with optional watermarking.
+    ///
+    /// The `message`-bearing branch is currently NOT PORTED. Calling this with
+    /// a non-nil message will trap with a clear error rather than crash inside
+    /// the partially-implemented watermark forward pass. The no-message branch
+    /// (the standard decode tail) works correctly and is what `DACVAE.decode`
+    /// uses in production.
+    ///
+    /// Known issues in the watermark path (see FOLLOW_UP.md P1):
+    ///   - `wmModel.decoderBlock.postProcess` has a channel mismatch:
+    ///     `post1.inChannels=32` vs LSTM `pre1.hidden=512`.
+    ///   - The upsample/downsample chain through `blocks` has not been
+    ///     numerically validated against the upstream Python reference.
+    ///   - Bit-extraction is missing entirely (Swift port is embed-only).
     public func decodeWithWatermark(_ x: MLXArray, message: MLXArray? = nil) -> MLXArray {
-        if let msg = message, alpha > 0.0 {
-            return watermark(x, message: msg)
-        } else {
-            // Standard path: snake -> conv -> tanh
-            var h = snakeOut(x)
-            h = MLX.tanh(convOut(h))
-            return h
+        if message != nil && alpha > 0.0 {
+            preconditionFailure("DACVAE watermark embedding is not yet ported — see FOLLOW_UP.md P1")
         }
+        // Standard path: snake -> conv -> tanh
+        var h = snakeOut(x)
+        h = MLX.tanh(convOut(h))
+        return h
     }
 
     /// Apply watermarking to the decoder output.

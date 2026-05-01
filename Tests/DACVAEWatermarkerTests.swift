@@ -25,14 +25,26 @@
 //    No BER threshold is applicable here because there is no decoder.
 //    This is a **finding** (see "Production Bugs" section below).
 //
-//  Production Bugs found during Sortie 18 (NOT fixed — reported only):
+//  Production status (FOLLOW_UP P1 resolution):
+//
+//    The watermark embedding path is DEAD CODE in production. `DACVAE.decode`
+//    (Sources/MLXAudioCodecs/DACVAE/DACVAE.swift:287) calls the decoder via
+//    `decoder(emb)` → `DACVAEFullDecoder.callAsFunction` (line 144), which
+//    only does `convIn → blocks` and never invokes `watermark()`. The public
+//    `decodeWithWatermark(_:message:)` is the only entry point to the watermark
+//    branch, and it is never called from anywhere in `Sources/`, `Tests/`, or
+//    `Examples/`.
+//
+//    `DACVAEFullDecoder.decodeWithWatermark` was updated in the FOLLOW_UP P1
+//    work to fail-fast with a clear precondition error when called with a
+//    non-nil message, so the bugs below remain present but are unreachable
+//    from any working code path.
+//
+//  Bugs left in place inside the dead path (revisit only if/when porting):
 //
 //    BUG-1  DACVAEWatermarkDecoderBlock channel mismatch:
 //      `postProcess` wires `post1` with `inChannels: channels` (default 32)
 //      but the output of `pre1` (LSTM) has `hidden` channels (default 512).
-//      Calling `postProcess` with default params will crash with an MLX
-//      shape-broadcast error.  Reproduce: `decoderBlock.postProcess(x)` where
-//      `x` has shape [1, T, 512] and `post1` expects inChannels=32.
 //      Source: Sources/MLXAudioCodecs/DACVAE/DACVAEWatermark.swift:176-183.
 //
 //    BUG-2  DACVAEFullDecoder.watermark() channel mismatch in upsample chain:
@@ -40,12 +52,13 @@
 //      `block.upsampleGroup()` which produces `wmOut = outputDim/3` channels.
 //      With the default config (channels=1536, rates=[12,10,8,2]), the final
 //      wmOut=32, but `encoderBlock.postProcess` passes that to an LSTM with
-//      `inputSize=hidden=512`.  This causes a runtime shape error.
-//      Source: Sources/MLXAudioCodecs/DACVAE/DACVAE.swift:175.
+//      `inputSize=hidden=512`. Source: Sources/MLXAudioCodecs/DACVAE/DACVAE.swift:175.
 //
-//    Both bugs indicate the watermark generation path has never been
-//    executed end-to-end with the default model configuration.
-//    Supervisor should decide whether to fix in a follow-up sortie.
+//    Bit-extraction is also missing entirely (the Swift port is embed-only).
+//
+//    Reviving the watermarker is a separate mission — requires numerical-parity
+//    validation against the upstream Python reference and a port of the
+//    extract/decode path. See FOLLOW_UP.md P1 for context.
 //
 
 import Testing

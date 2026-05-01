@@ -25,25 +25,23 @@ Source: `docs/complete/echo-dragnet-01-brief.md` § Section 3.
 
 ---
 
-## P1 — DACVAE Watermarker: channel mismatches + embed-only port
+## P1 — DACVAE Watermarker: channel mismatches + embed-only port — **RESOLVED (parked)**
 
-**Status:** open
-**Blast radius:** Default-config watermark path crashes at runtime. Bit-extraction is missing entirely.
-**Evidence:**
-- `Sources/MLXAudioCodecs/DACVAE/DACVAEWatermark.swift:177` — `postProcess` declares `inChannels=32` against an LSTM hidden of 512.
-- `Sources/MLXAudioCodecs/DACVAE/DACVAE.swift:175` — `DACVAEFullDecoder.watermark()` has the same downstream mismatch.
-- No bit-extraction code path exists in `Sources/MLXAudioCodecs/DACVAE/`.
+**Decision:** Park the dead path with a fail-fast precondition. Don't fix the channel mismatches; don't port extraction; don't deprecate the types.
 
-### TODO
+**Investigation findings:**
+- `grep` of `Sources/`, `Tests/`, `Examples/` for `decodeWithWatermark` / `.watermark(` returns ZERO production call sites. The only references are in `Tests/DACVAEWatermarkerTests.swift` (header comments + shape tests of the watermarker types' constructors) and a comment in the test file itself.
+- The watermarker **types** (`DACVAEWatermarker`, `DACVAEWatermarkEncoderBlock`, `DACVAEWatermarkDecoderBlock`) ARE referenced by `@ModuleInfo` in `DACVAEFullDecoder` — needed for weight loading. Removing them would break `DACVAE.decode`.
+- The watermark **forward pass** (`DACVAEFullDecoder.watermark()` / `decodeWithWatermark` with non-nil message) is genuinely dead code: `DACVAE.decode` only calls `decoder(emb)` → `DACVAEFullDecoder.callAsFunction` (line 144), which never invokes the watermark path.
 
-- [ ] **Pre-decision step:** `grep -rn "DACVAEWatermark\|DACVAEFullDecoder.watermark\|\.watermark(" Sources/ Examples/ Tests/` to find callers.
-- [ ] **If zero non-test callers:** mark the public surface `@available(*, unavailable, message: "Watermark feature not yet ported — embed-only, default config crashes")`. Don't fix dead code.
-- [ ] **If callers exist:** fix `inChannels` at both sites (likely change 32 → 512 to match `lstmHidden`). Add a runtime assertion that the channel counts agree at construction time so the failure mode becomes a fail-fast instead of silent crash. Verify via a unit test that exercises the default-config path.
-- [ ] **Bit-extraction port:** explicitly OUT OF SCOPE for this follow-up. File a separate tracking issue with the upstream Python reference. Only revisit when a real consumer needs it.
-- [ ] Update `Tests/MLXAudioCodecsTests.swift::DACVAEWatermarkerTests` to either re-assert round-trip (if extraction lands) or document the embed-only contract permanently.
+**Fix (current commit):**
+- `Sources/MLXAudioCodecs/DACVAE/DACVAE.swift::DACVAEFullDecoder.decodeWithWatermark`: replaced the `if message != nil { return watermark(...) }` branch with `preconditionFailure("DACVAE watermark embedding is not yet ported — see FOLLOW_UP.md P1")`. The no-message path still works.
+- `Tests/DACVAEWatermarkerTests.swift`: header comments updated. The "BUG-1 / BUG-2 not fixed" framing replaced with a "parked dead code" framing that names the precondition and points to this FOLLOW_UP entry.
+- `make test`: 219/219 PASS.
 
-**Cost:** 15 min grep + 30-90 min depending on caller-count branch.
-**Model:** sonnet.
+**Carry forward:**
+- The two channel-mismatch bugs and the missing extract path remain unfixed. They are now unreachable. Reviving the watermarker is a separate mission that requires upstream-Python parity validation and an extract port.
+- The original Sortie 18 brief framed these as "production bugs" — they are NOT, because no production code reaches them. The next brief should distinguish "dead-path bug" from "live-path bug" so the urgency is clearer up front.
 
 ---
 
