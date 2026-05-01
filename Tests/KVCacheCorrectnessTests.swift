@@ -9,8 +9,8 @@
 //
 //  This sortie (Sortie 22) follows the compile-only contract established in
 //  Sortie 21 (DeterministicGenerationTests.swift):
-//   - Model loading is guarded behind `try #require(false, ...)` stubs that
-//     skip gracefully when the model is unavailable.
+//   - Model loading is gated by `MLXAUDIO_NIGHTLY_RUN=1`. Tests skip gracefully
+//     when the env var is unset (no models loaded).
 //   - `xcodebuild build-for-testing` must exit 0; no `xcodebuild test` in CI.
 //   - Runtime validation deferred to nightly workflow + manual local runs.
 //
@@ -18,6 +18,7 @@
 //  LlamaTTS synthetic config would need a small vocab + few layers; Qwen3ASR
 //  requires audio encoder + text decoder wiring. Neither has been benchmarked
 //  yet. Promote to CI-safe after local validation confirms <10 min wall time.
+//  See FOLLOW_UP.md P2 (synthetic harness).
 //
 //  ─────────────────────────────────────────────────────────────────────────────
 //  WHAT THIS SUITE TESTS
@@ -32,7 +33,7 @@
 //  Assertion: MLX.allclose(logits_singleshot, logits_incremental, atol: 1e-4, rtol: 1e-4)
 //
 //  ─────────────────────────────────────────────────────────────────────────────
-//  API GAP FINDINGS (Sortie 22 investigation, 2026-04-30)
+//  API SURFACE (Sortie 22 + FOLLOW_UP P2 resolution)
 //
 //  LlamaTTS — PUBLIC API COMPLETE:
 //    • `LlamaTTSModel.callAsFunction(_ inputs: MLXArray, cache: [KVCache]?) -> MLXArray`
@@ -42,23 +43,16 @@
 //      (requires tokenizer loaded, so needs fromPretrained).
 //    • Single-shot vs incremental decode is fully expressible via public API.
 //
-//  Qwen3ASR — PARTIAL API GAP:
+//  Qwen3ASR — FULL (FOLLOW_UP P2 resolution):
 //    • `Qwen3ASRModel.callAsFunction(inputIds:inputEmbeddings:inputFeatures:featureAttentionMask:cache:)`
 //      is public and returns raw logits.
 //    • `Qwen3ASRModel.makeCache() -> [KVCache]` is public.
 //    • `Qwen3ASRModel.preprocessAudio(_:)` and `getAudioFeatures(_:featureAttentionMask:)` are public.
 //    • `Qwen3ASRModel.buildPrompt(numAudioTokens:language:)` is public.
-//    • BUT `Qwen3ASRModel.mergeAudioFeatures(inputsEmbeds:audioFeatures:inputIds:)` is PRIVATE.
-//      This function injects audio encoder features into the input embedding tensor at the
-//      positions marked by `<|audio_pad|>` tokens. It is called internally before prefill,
-//      but it cannot be called from test code.
-//    • CONSEQUENCE: The incremental decode path cannot be constructed from the public API
-//      without replicating the private `mergeAudioFeatures` logic in test code.
-//    • MITIGATION USED: This test uses `try #require(false, "API gap ...")` to skip gracefully.
-//      The Qwen3ASR incremental test compiles clean and records the gap for follow-up.
-//    • PROMOTION PATH: Add `internal func mergeAudioFeatures(...)` or expose a
-//      `callWithMergedFeatures(audioFeatures:numAudioTokens:cache:) -> MLXArray`
-//      public entry point in production code, then remove the require-false stub.
+//    • `Qwen3ASRModel.mergeAudioFeatures(inputsEmbeds:audioFeatures:inputIds:)` was promoted
+//      from `private` to `internal` in FOLLOW_UP P2 so KV-cache parity tests can reach it
+//      via `@testable import MLXAudioSTT`. Single-shot vs prefill+decode is now fully
+//      expressible from test code.
 //
 //  ─────────────────────────────────────────────────────────────────────────────
 //  Run locally (requires mlx-models-v2 cache populated):
@@ -160,47 +154,25 @@ struct KVCacheCorrectnessTests {
 
     /// KV cache correctness test for Qwen3ASR (text decoder only).
     ///
-    /// API GAP (PARTIAL IMPLEMENTATION):
-    ///   `Qwen3ASRModel.mergeAudioFeatures(inputsEmbeds:audioFeatures:inputIds:)` is private.
-    ///   This prevents constructing the incremental decode path from test code without
-    ///   duplicating private logic. See file header comment for the full gap analysis
-    ///   and promotion path.
+    /// Loads the model, synthesizes a fixed-length silent audio clip, then:
+    ///   1. Single-shot forward: pass `inputFeatures` so the model merges audio
+    ///      internally on the first call.
+    ///   2. Incremental forward: precompute audio features, merge them into the
+    ///      input embeddings via `model.mergeAudioFeatures(...)` (now `internal`,
+    ///      reachable via `@testable import MLXAudioSTT`), then prefill into a
+    ///      fresh KV cache.
     ///
-    /// This test is a STUB that skips gracefully via `try #require(false, ...)` and
-    /// records the API gap for follow-up. When `mergeAudioFeatures` is promoted to
-    /// `internal` (or a public entry point is added), replace the stub with the full
-    /// assertion.
+    /// Asserts `MLX.allclose(rtol: 1e-4, atol: 1e-4)` on the last-position logits.
     ///
     /// LOCAL-ONLY: requires `mlx-community/Qwen3-ASR` in mlx-models-v2 cache.
+    /// The `try #require` guard skips at runtime unless `MLXAUDIO_NIGHTLY_RUN=1`.
     @Test func qwen3ASRKVCacheCorrectness() async throws {
-        // Guard: API gap — see file header for promotion path.
-        // This also serves as the compile-only contract guard (matches Sortie 21 pattern).
-        // `Bool(false)` suppresses the Swift compiler warning about always-failing #require.
-        // This is the same pattern used for documented API-gap stubs: the test compiles
-        // cleanly but skips at runtime, recording the gap for follow-up.
+        // Guard: compile-only contract — skip at runtime until model is available locally.
+        // Mirrors the LlamaTTS guard above. Removed once nightly validation passes.
         try #require(
-            Bool(false),
-            """
-            Qwen3ASR KV cache correctness test SKIPPED — API gap.
-            `Qwen3ASRModel.mergeAudioFeatures(inputsEmbeds:audioFeatures:inputIds:)` is private.
-            The incremental decode path (prefill with merged audio features + token-by-token decode)
-            cannot be constructed from public/internal test code without replicating private logic.
-
-            Promotion path:
-              1. Promote `mergeAudioFeatures` to `internal` in Qwen3ASR.swift (one-line change).
-              2. OR add a public `callWithMergedFeatures(audioFeatures:numAudioTokens:cache:) -> MLXArray`
-                 entry point that handles embedding + merging in one call.
-              3. Then replace this `require(false, ...)` stub with the full single-shot vs
-                 incremental assertion using `MLX.allClose(rtol: 1e-4, atol: 1e-4)`.
-
-            This test compiles cleanly and records the gap so it is not silently lost.
-            Sortie 22, 2026-04-30.
-            """
+            Bool(ProcessInfo.processInfo.environment["MLXAUDIO_NIGHTLY_RUN"] != nil),
+            "Qwen3ASR KV cache correctness test is LOCAL-ONLY. Set MLXAUDIO_NIGHTLY_RUN=1 to run. Requires mlx-community/Qwen3-ASR in mlx-models-v2 cache."
         )
-
-        // The code below will NOT execute (guarded by require(false) above).
-        // It is written to document the intended test logic and to ensure the
-        // API surface is exercised at the type level during compilation.
 
         // Load model (requires mlx-models-v2 cache).
         let model = try await Qwen3ASRModel.fromPretrained(
@@ -230,26 +202,40 @@ struct KVCacheCorrectnessTests {
         )
         eval(logitsSingleShot)
 
-        // ── Path 2: Incremental forward (prefill + decode with KV cache) ────
-        // API GAP: `mergeAudioFeatures` is private so we cannot construct `inputsEmbeds`
-        // with the audio features injected here. The code below is intentionally
-        // unreachable (gated by require(false) above) but documents the intended flow.
-        //
-        // If mergeAudioFeatures were internal/public, the test would:
-        //   let audioFeatures = model.getAudioFeatures(inputFeatures, featureAttentionMask: featureAttentionMask)
-        //   let embeds = model.model.embedTokens(inputIds)
-        //   let mergedEmbeds = model.mergeAudioFeatures(inputsEmbeds: embeds, audioFeatures: audioFeatures, inputIds: inputIds)
-        //   let cache = model.makeCache()
-        //   let logitsPrefill = model(inputIds: inputIds, inputEmbeddings: mergedEmbeds, cache: cache)
-        //   let match = MLX.allClose(logitsSingleShot[0..., -1, 0...], logitsPrefill[0..., -1, 0...], rtol: 1e-4, atol: 1e-4).item(Bool.self)
-        //   #expect(match, "Qwen3ASR KV cache correctness FAILED: single-shot and prefill logits diverge.")
+        // ── Path 2: Incremental forward (prefill with merged features + KV cache) ────
+        // Reproduce the merge step that the model would do internally on the first
+        // single-shot call, then feed the merged embeddings to a fresh-cache prefill.
+        let audioFeatures = model.getAudioFeatures(
+            inputFeatures,
+            featureAttentionMask: featureAttentionMask
+        )
+        let embeds = model.model.embedTokens(inputIds)
+        let mergedEmbeds = model.mergeAudioFeatures(
+            inputsEmbeds: embeds,
+            audioFeatures: audioFeatures,
+            inputIds: inputIds
+        )
 
-        // Suppress unused-variable warnings from the code above.
-        _ = logitsSingleShot
-        _ = inputIds
-        _ = inputFeatures
-        _ = featureAttentionMask
-        _ = numAudioTokens
+        let cache = model.makeCache()
+        let logitsPrefill = model(
+            inputIds: inputIds,
+            inputEmbeddings: mergedEmbeds,
+            inputFeatures: nil,
+            featureAttentionMask: nil,
+            cache: cache
+        )
+        eval(logitsPrefill)
+
+        // Assert last-position logits match within atol/rtol.
+        let seqLen = inputIds.dim(1)
+        let lastSingleShot = logitsSingleShot[0..., seqLen - 1, 0...]
+        let lastPrefill = logitsPrefill[0..., seqLen - 1, 0...]
+
+        let match = MLX.allClose(lastSingleShot, lastPrefill, rtol: 1e-4, atol: 1e-4).item(Bool.self)
+        #expect(
+            match,
+            "Qwen3ASR KV cache correctness FAILED: single-shot and prefill logits diverge at last token position. This indicates a KV cache regression (e.g., RoPE offset error, audio-feature merge ordering, or incorrect cache update)."
+        )
 
         Memory.clearCache()
     }

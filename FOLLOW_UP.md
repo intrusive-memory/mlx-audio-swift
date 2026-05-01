@@ -72,20 +72,14 @@ Source: `docs/complete/echo-dragnet-01-brief.md` § Section 3.
 
 ---
 
-## P2 — `Qwen3ASR.mergeAudioFeatures` access change
+## P2 — `Qwen3ASR.mergeAudioFeatures` access change — **RESOLVED in commit follows**
 
-**Status:** trivial; one-token change unlocks Sortie 22's STT branch
-**Blast radius:** None on production. Currently `private`; testing of KV-cache correctness on the STT path is stub-skipped (`Tests/KVCacheCorrectnessTests.swift`).
-
-### TODO
-
-- [ ] Find `mergeAudioFeatures` in `Sources/MLXAudioSTT/...` (likely `Qwen3ASR.swift` or sibling). Change `private` → `internal`.
-- [ ] In `Tests/KVCacheCorrectnessTests.swift` — restore the full STT assertion. The test target uses `@testable import MLXAudioSTT`, which gives access to `internal` symbols. No public surface added.
-- [ ] Run `xcodebuild build-for-testing -scheme MLXAudio-Package -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO` to verify the test compiles.
-- [ ] Update the test header comment to remove the "PARTIAL — API gap" note.
-
-**Cost:** 5-10 min.
-**Model:** haiku — well-defined, single-token change with verification.
+- `private` → `internal` on `Qwen3ASRModel.mergeAudioFeatures(inputsEmbeds:audioFeatures:inputIds:)` at `Sources/MLXAudioSTT/Models/Qwen3ASR/Qwen3ASR.swift:760`. Doc comment added explaining the access level.
+- `Tests/KVCacheCorrectnessTests.swift::qwen3ASRKVCacheCorrectness`: replaced the `try #require(Bool(false), ...)` API-gap stub with a full single-shot vs prefill+merge assertion using `MLX.allClose(rtol: 1e-4, atol: 1e-4)`. Now mirrors the LlamaTTS test pattern.
+- Runtime guard switched from "stub-skip" to `MLXAUDIO_NIGHTLY_RUN=1` env-var gate (matches LlamaTTS sibling test).
+- File header reframed from "API GAP FINDINGS" → "API SURFACE". Both LlamaTTS and Qwen3ASR are now PUBLIC API COMPLETE for KV-cache parity.
+- `make test`: 219/219 PASS. `xcodebuild build-for-testing` exit 0.
+- The runtime assertion has not yet been validated against a real Qwen3-ASR checkpoint — that's nightly + manual local work.
 
 ---
 
