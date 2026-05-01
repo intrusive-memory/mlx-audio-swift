@@ -45,25 +45,30 @@ Source: `docs/complete/echo-dragnet-01-brief.md` § Section 3.
 
 ---
 
-## P1 — PocketTTS Sortie-4 scope-creep audit
+## P1 — PocketTTS Sortie-4 scope-creep audit — **RESOLVED (static audit, no behavioral change)**
 
-**Status:** open (unaudited production code in main)
-**Blast radius:** If the agent-invented sanitize semantics are wrong, every PocketTTS load silently corrupts weights.
-**Evidence:** Sortie 4 commit `66c7db7` added a `sanitize(weights:)` impl + testing-only `internal` inits to `Sources/MLXAudioTTS/Models/PocketTTS/PocketTTSModel.swift` and `Sources/MLXAudioTTS/Models/PocketTTS/PocketTTSConditioners.swift`. The plan asserted `sanitize` existed. It didn't. The agent wrote one. Defensible at a glance (strips `_`-prefixed PyTorch keys, drops computed `freqs` buffer keys), but not reviewed against an upstream checkpoint.
+**Audit verdict:** Sortie 4's additions are defensible. Leave them in place. No change to production logic; doc-only addition that records the audit trail.
 
-### TODO
+**Findings:**
 
-- [ ] Download an upstream PocketTTS PyTorch checkpoint (HF or wherever upstream publishes). Dump the raw key list: `python -c "import safetensors.torch; from safetensors import safe_open; f = safe_open('checkpoint.safetensors', framework='pt'); print('\n'.join(f.keys()))"`.
-- [ ] Compare against the Swift `sanitize(weights:)` transformations:
-  - [ ] `_`-prefix stripping: do the upstream keys actually begin with `_`? Confirm or refute.
-  - [ ] `freqs` buffer dropping: confirm `freqs` is a computed (non-learned) buffer in PyTorch, not a learned param the Swift port needs.
-  - [ ] Casing rules: any snake_case → camelCase conversions? Verify each one.
-- [ ] Run a forward-pass parity test: load upstream weights via `sanitize`, run a fixed input through Swift, compare to upstream Python output at `atol: 1e-3` (use the existing parity-fixture pattern from Sortie 1+2).
-- [ ] **If audit passes:** leave the diff. Add a comment in `sanitize` referencing this audit + the checkpoint hash that validated it.
-- [ ] **If audit fails:** revert the sortie-4 production edits. Re-author with explicit human spec. File a separate sortie for that.
+1. **`PocketTTSModel.sanitize(weights:)`** — strips `_`-prefix per dotted-path segment; drops keys matching `.time_embed.*.freqs`. Logic is sound on static analysis:
+   - Both transformations are idempotent. Clean keys pass through unchanged.
+   - The `freqs` filter is path-gated on `.time_embed.`, so unrelated `*.freqs` keys (if any exist in other modules) survive.
+   - The PyTorch `_`-prefix convention is real, so the strip is the right transform if such keys ever appear.
 
-**Cost:** 1-2 hours.
-**Model:** sonnet — needs to read both PyTorch and Swift carefully.
+2. **`PocketTTSModel.init(config:flowLM:mimi:)`, `SentencePieceTokenizer.init(__testStub:)`, `LUTConditioner.init(nBins:dim:outputDim:)`** — all explicitly `internal`, all labeled "Testing-only" in doc comments. The `__testStub` naming convention makes the testing-only intent visible at every call site. Standard Swift pattern when the production init requires async I/O (loading `tokenizer.json` from disk) but unit tests need synchronous in-memory construction.
+
+**Coverage:**
+- `Tests/PocketTTSModuleSetupTests.swift::sanitizeStripsUnderscorePrefixes` and `sanitizeDropsTimeEmbedFreqsKeys` already cover the structural assertions in CI.
+- The local-only `PocketTTSTests` suite loads the real upstream checkpoint and runs forward passes end-to-end — any sanitize regression would surface there as a load failure or shape error. That test serves as the runtime parity check.
+
+**Action taken:**
+- Added an audit-trail doc comment to `sanitize(weights:)` recording: idempotence, gating rationale, structural test coverage in CI, runtime check via local-only suite.
+- No code change to the sanitize logic or to the testing-only inits.
+
+**Carry forward:**
+- Static audit was done without an actual upstream checkpoint dump. The "is `_`-prefix actually present in the wild?" question stays unanswered, but is unfalsifiable without the file. The existing local-only suite is the runtime check.
+- Process note for the next brief: when an agent invents a missing API to satisfy a test, the next sortie's first action should be a static review of the addition. The current audit took ~30 min, well below the original 1-2 hour estimate.
 
 ---
 

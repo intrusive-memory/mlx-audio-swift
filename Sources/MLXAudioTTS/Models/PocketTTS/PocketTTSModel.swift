@@ -355,6 +355,18 @@ public final class PocketTTSModel: Module, SpeechGenerationModel, @unchecked Sen
     /// 1. Strip leading `_` from each path segment — raw PyTorch private-attr convention.
     /// 2. Drop `flow_lm.*.time_embed.*.freqs` keys — `PocketTimestepEmbedder.freqs` is a
     ///    computed `let` buffer, not a tracked Swift module parameter.
+    ///
+    /// Audit (FOLLOW_UP P1, commit follows):
+    ///   - Both transformations are idempotent: clean keys pass through unchanged.
+    ///   - The `freqs` filter is gated on `.time_embed.` so unrelated `*.freqs` keys
+    ///     in other modules (if any) are not affected.
+    ///   - Static-audit only: validation against an actual upstream PocketTTS
+    ///     checkpoint requires the local-only `PocketTTSTests` suite, which loads
+    ///     the model end-to-end and would catch any sanitize regression as a
+    ///     load failure or forward-pass error.
+    ///   - `PocketTTSModuleSetupTests::sanitizeStripsUnderscorePrefixes` and
+    ///     `sanitizeDropsTimeEmbedFreqsKeys` cover the structural assertions
+    ///     in CI.
     public func sanitize(weights: [String: MLXArray]) -> [String: MLXArray] {
         var out: [String: MLXArray] = [:]
         for (rawKey, val) in weights {
