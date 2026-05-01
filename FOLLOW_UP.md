@@ -83,65 +83,20 @@ Source: `docs/complete/echo-dragnet-01-brief.md` § Section 3.
 
 ---
 
-## P2 — Promote Sortie 22/23 to CI-safe via synthetic small-config harness
+## P2 — Promote Sortie 22/23 to CI-safe via synthetic small-config harness — **TRACKED in [#19](https://github.com/intrusive-memory/mlx-audio-swift/issues/19)**
 
-**Status:** open opportunity
-**Blast radius:** Currently nightly-only. Promoting to CI-safe means every PR catches autoregressive-correctness and weight-serialization regressions, not just the nightly run on `mlx-models-v2` cache.
+Open opportunity. Currently nightly-only — promoting to CI-safe means every PR catches autoregressive-correctness and weight-serialization regressions instead of waiting up to 24h for the nightly run.
 
-### TODO
-
-- [ ] Author a tiny synthetic LlamaTTS config in a new test helper `Tests/Helpers/SyntheticConfigs.swift`:
-  - [ ] `numLayers: 1`, `hiddenSize: 32`, `numHeads: 4`, `vocabSize: 256`.
-  - [ ] Random init via `MLXRandom.normal(shape:)` with a fixed `MLXRandom.seed(42)`.
-  - [ ] Verify forward pass on a 16-token sequence runs in <1s on macOS.
-- [ ] Same pattern for Qwen3ASR: tiny config + synthetic mel-spectrogram input.
-- [ ] In `Tests/KVCacheCorrectnessTests.swift`:
-  - [ ] Add a synthetic-harness test that runs at every CI invocation (no `MLXAUDIO_NIGHTLY_RUN=1` gate).
-  - [ ] Keep the full-model variant gated on the env flag.
-- [ ] Same pattern for `Tests/WeightRoundTripTests.swift`.
-- [ ] Wire both synthetic-harness tests into the CI-safe `make test` block in `CLAUDE.md`.
-- [ ] Verify total CI-safe `make test` wall time stays under reasonable budget (target: synthetic harness adds <60s).
-
-**Cost:** 2-4 hours.
-**Model:** sonnet.
+The work, friction points, acceptance criteria, and risks are documented in issue [#19](https://github.com/intrusive-memory/mlx-audio-swift/issues/19). Estimated cost: 4-6 hours of focused work in a separate sortie. The prerequisite (P2 access change) is already done in commit `65cbf4e`.
 
 ---
 
-## P3 — Swift resampler 48k→24k — defer until forced
+## P3 — Swift resampler 48k→24k — **TRACKED in [#20](https://github.com/intrusive-memory/mlx-audio-swift/issues/20)**
 
-**Status:** deferred (no current blocker)
-**Rationale:** No Swift resampler exists in `Sources/`. Sortie 16 documented this with `resample48to24kIsNotYetImplemented`. `AVAudioConverter` covers any I/O-boundary need today. The only forcing function for a Swift impl is a future parity test that requires deterministic, cross-Apple-platform sample-rate conversion at numerical precision below what `AVAudioConverter` guarantees.
-
-### TODO
-
-- [ ] File a tracking issue (GitHub) titled "Swift 48k→24k resampler — implement when first parity test forces it." Link to:
-  - `Tests/MLXAudioCoreDSPTests.swift::resample48to24kIsNotYetImplemented`
-  - `docs/complete/echo-dragnet-01-brief.md` § Section 3, item 4
-- [ ] No code change. Close this entry as deferred.
-
-**Cost:** 5 min.
-**Model:** N/A (admin task).
+Deferred. No Swift resampler exists in `Sources/`; `AVAudioConverter` covers all current I/O-boundary needs. The only forcing function is a future parity test that requires deterministic cross-Apple-platform conversion at precision below what `AVAudioConverter` guarantees. See issue [#20](https://github.com/intrusive-memory/mlx-audio-swift/issues/20) for the trigger condition and acceptance criteria.
 
 ---
 
-## Suggested mission shape
+## Status
 
-Package P0–P2 (5 entries) as a single follow-up mission. P3 is admin and can be done in passing.
-
-| Sortie | Task | Model | Est. cost |
-|--------|------|-------|-----------|
-| 1 | AudioUtils saveAudioArray flush fix + assertion re-enable | sonnet | 30 min – 2 hr |
-| 2 | DACVAE Watermarker: grep callers, fix-or-deprecate | sonnet | 30-90 min |
-| 3 | PocketTTS sanitize audit against upstream checkpoint | sonnet | 1-2 hr |
-| 4 | Qwen3ASR private→internal + restore KV-cache STT assertion | haiku | 10 min |
-| 5 | Synthetic-config harness; promote KV/weight-RT to CI-safe | sonnet | 2-4 hr |
-
-Total: half a day to a full day of agent time. Sorties 1–4 are independent; Sortie 5 stands alone. No dependency layering needed beyond Sortie 4 → Sortie 5 (the synthetic harness benefits from but doesn't strictly require the access change).
-
-P0 can ship as a standalone hot-fix PR before the rest of the mission starts if the AudioUtils truncation is causing immediate consumer pain.
-
----
-
-## Mission-naming note
-
-Per the mission-supervisor `name-feature` ritual, the next mission gets its own operation name (NOT "Echo Dragnet 02" — that would be an iteration of the same scope, but this is new follow-up work). When ready to start: `/mission-supervisor breakdown FOLLOW_UP.md`.
+All FOLLOW_UP items are now either resolved on `development` or tracked in GitHub issues. This file can be archived to `docs/complete/` (matching the `echo-dragnet-01-brief.md` / `echo-dragnet-01-plan.md` pattern) when convenient.
