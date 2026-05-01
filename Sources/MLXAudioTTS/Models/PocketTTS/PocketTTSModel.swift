@@ -37,6 +37,18 @@ public final class PocketTTSModel: Module, SpeechGenerationModel, @unchecked Sen
         super.init()
     }
 
+    /// Testing-only init: constructs a PocketTTSModel with pre-built sub-models,
+    /// using a dummy modelFolder URL. Intended for CI-safe unit tests where file I/O
+    /// must not occur and no tokenizer or weight file is required.
+    internal init(config: PocketTTSModelConfig, flowLM: FlowLMModel, mimi: MimiAdapter) {
+        self.config = config
+        self.modelFolder = URL(fileURLWithPath: "/dev/null")
+        self._flow_lm = ModuleInfo(wrappedValue: flowLM)
+        self._mimi = ModuleInfo(wrappedValue: mimi)
+        self.speaker_proj_weight = MLXArray.zeros([config.flowLM.transformer.dModel, config.mimi.quantizer.outputDimension])
+        super.init()
+    }
+
     public static func fromConfig(_ config: PocketTTSModelConfig, modelFolder: URL) async throws -> PocketTTSModel {
         let flowLM = try await FlowLMModel.fromConfig(
             config.flowLM,
@@ -333,6 +345,47 @@ public final class PocketTTSModel: Module, SpeechGenerationModel, @unchecked Sen
         }
 
         return stream
+    }
+
+    // MARK: - Weight Sanitization
+
+    /// Transform raw upstream weight keys into the key names expected by this Swift module tree.
+    ///
+    /// Transformations applied (safe to call even when weights are already clean):
+    /// 1. Strip leading `_` from each path segment — raw PyTorch private-attr convention.
+    /// 2. Drop `flow_lm.*.time_embed.*.freqs` keys — `PocketTimestepEmbedder.freqs` is a
+    ///    computed `let` buffer, not a tracked Swift module parameter.
+    ///
+    /// Audit (FOLLOW_UP P1, commit follows):
+    ///   - Both transformations are idempotent: clean keys pass through unchanged.
+    ///   - The `freqs` filter is gated on `.time_embed.` so unrelated `*.freqs` keys
+    ///     in other modules (if any) are not affected.
+    ///   - Static-audit only: validation against an actual upstream PocketTTS
+    ///     checkpoint requires the local-only `PocketTTSTests` suite, which loads
+    ///     the model end-to-end and would catch any sanitize regression as a
+    ///     load failure or forward-pass error.
+    ///   - `PocketTTSModuleSetupTests::sanitizeStripsUnderscorePrefixes` and
+    ///     `sanitizeDropsTimeEmbedFreqsKeys` cover the structural assertions
+    ///     in CI.
+    public func sanitize(weights: [String: MLXArray]) -> [String: MLXArray] {
+        var out: [String: MLXArray] = [:]
+        for (rawKey, val) in weights {
+            // 1. Strip leading underscores from each path segment.
+            let stripped = rawKey
+                .split(separator: ".", omittingEmptySubsequences: false)
+                .map { seg -> String in
+                    seg.hasPrefix("_") ? String(seg.dropFirst()) : String(seg)
+                }
+                .joined(separator: ".")
+
+            // 2. Drop computed buffer keys that have no Swift parameter counterpart.
+            if stripped.contains(".time_embed.") && stripped.hasSuffix(".freqs") {
+                continue
+            }
+
+            out[stripped] = val
+        }
+        return out
     }
 
     // MARK: - Loading

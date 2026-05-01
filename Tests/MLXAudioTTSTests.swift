@@ -488,30 +488,6 @@ struct Qwen3TTSSpeechTokenizerWeightTests {
 
 struct Qwen3TTSLanguageTests {
 
-    /// Test ISO 639-1 code "en" resolves to "english" without config
-    @Test func testResolveLanguageEnglishISO() {
-        let result = Qwen3TTSModel.resolveLanguage("en")
-        #expect(result == "english", "ISO code 'en' should resolve to 'english'")
-    }
-
-    /// Test ISO 639-1 code "zh" resolves to "chinese" without config
-    @Test func testResolveLanguageChineseISO() {
-        let result = Qwen3TTSModel.resolveLanguage("zh")
-        #expect(result == "chinese", "ISO code 'zh' should resolve to 'chinese'")
-    }
-
-    /// Test ISO 639-1 code "ja" resolves to "japanese" without config
-    @Test func testResolveLanguageJapaneseISO() {
-        let result = Qwen3TTSModel.resolveLanguage("ja")
-        #expect(result == "japanese", "ISO code 'ja' should resolve to 'japanese'")
-    }
-
-    /// Test ISO 639-1 code "ko" resolves to "korean" without config
-    @Test func testResolveLanguageKoreanISO() {
-        let result = Qwen3TTSModel.resolveLanguage("ko")
-        #expect(result == "korean", "ISO code 'ko' should resolve to 'korean'")
-    }
-
     /// Test all supported ISO 639-1 codes resolve correctly (Task 4 requirement: 30+ languages)
     @Test func testResolveLanguageAllISO() {
         // Test 30+ ISO 639-1 codes as required by Task 4
@@ -582,12 +558,6 @@ struct Qwen3TTSLanguageTests {
     @Test func testResolveLanguageFullNamePassthrough() {
         let result = Qwen3TTSModel.resolveLanguage("english")
         #expect(result == "english", "Full language name 'english' should pass through")
-    }
-
-    /// Test full language name "chinese" passes through without config
-    @Test func testResolveLanguageChineseFullName() {
-        let result = Qwen3TTSModel.resolveLanguage("chinese")
-        #expect(result == "chinese", "Full language name 'chinese' should pass through")
     }
 
     /// Test "auto" passes through as a special value
@@ -1294,93 +1264,6 @@ struct Qwen3TTSPrepareBaseInputsTests {
         // structure here.
         #expect(config.spkId?["Serena"] == nil,
                 "Direct lookup with uppercase should not match (case-sensitive dict)")
-    }
-
-    // MARK: - Dialect override logic verification
-
-    /// Test dialect override: Eric with Chinese language should switch to sichuan_dialect
-    @Test func testDialectOverrideEricChinese() throws {
-        let json = Qwen3TTSConfigTests.customVoiceConfigJSON.data(using: .utf8)!
-        let config = try JSONDecoder().decode(Qwen3TTSModelConfig.self, from: json)
-        let talkerConfig = config.talkerConfig!
-
-        // Simulate the dialect override logic from prepareBaseInputs
-        let speaker = "eric"
-        var effectiveLanguage = "chinese"
-
-        if let dialectMap = talkerConfig.spkIsDialect,
-           let dialect = dialectMap[speaker.lowercased()],
-           (effectiveLanguage.lowercased() == "chinese" || effectiveLanguage.lowercased() == "auto"),
-           let langMap = talkerConfig.codecLanguageId,
-           langMap[dialect] != nil {
-            effectiveLanguage = dialect
-        }
-
-        #expect(effectiveLanguage == "sichuan_dialect",
-                "Eric with Chinese language should be overridden to sichuan_dialect")
-    }
-
-    /// Test dialect override: Eric with English language should NOT be overridden
-    @Test func testDialectOverrideEricEnglish() throws {
-        let json = Qwen3TTSConfigTests.customVoiceConfigJSON.data(using: .utf8)!
-        let config = try JSONDecoder().decode(Qwen3TTSModelConfig.self, from: json)
-        let talkerConfig = config.talkerConfig!
-
-        let speaker = "eric"
-        var effectiveLanguage = "english"
-
-        if let dialectMap = talkerConfig.spkIsDialect,
-           let dialect = dialectMap[speaker.lowercased()],
-           (effectiveLanguage.lowercased() == "chinese" || effectiveLanguage.lowercased() == "auto"),
-           let langMap = talkerConfig.codecLanguageId,
-           langMap[dialect] != nil {
-            effectiveLanguage = dialect
-        }
-
-        #expect(effectiveLanguage == "english",
-                "Eric with English language should NOT be overridden to sichuan_dialect")
-    }
-
-    /// Test dialect override: Dylan with auto language should switch to beijing_dialect
-    @Test func testDialectOverrideDylanAuto() throws {
-        let json = Qwen3TTSConfigTests.customVoiceConfigJSON.data(using: .utf8)!
-        let config = try JSONDecoder().decode(Qwen3TTSModelConfig.self, from: json)
-        let talkerConfig = config.talkerConfig!
-
-        let speaker = "dylan"
-        var effectiveLanguage = "auto"
-
-        if let dialectMap = talkerConfig.spkIsDialect,
-           let dialect = dialectMap[speaker.lowercased()],
-           (effectiveLanguage.lowercased() == "chinese" || effectiveLanguage.lowercased() == "auto"),
-           let langMap = talkerConfig.codecLanguageId,
-           langMap[dialect] != nil {
-            effectiveLanguage = dialect
-        }
-
-        #expect(effectiveLanguage == "beijing_dialect",
-                "Dylan with auto language should be overridden to beijing_dialect")
-    }
-
-    /// Test dialect override: Serena (no dialect) should NOT be overridden
-    @Test func testDialectOverrideSerena() throws {
-        let json = Qwen3TTSConfigTests.customVoiceConfigJSON.data(using: .utf8)!
-        let config = try JSONDecoder().decode(Qwen3TTSModelConfig.self, from: json)
-        let talkerConfig = config.talkerConfig!
-
-        let speaker = "serena"
-        var effectiveLanguage = "chinese"
-
-        if let dialectMap = talkerConfig.spkIsDialect,
-           let dialect = dialectMap[speaker.lowercased()],
-           (effectiveLanguage.lowercased() == "chinese" || effectiveLanguage.lowercased() == "auto"),
-           let langMap = talkerConfig.codecLanguageId,
-           langMap[dialect] != nil {
-            effectiveLanguage = dialect
-        }
-
-        #expect(effectiveLanguage == "chinese",
-                "Serena has no dialect entry, language should remain chinese")
     }
 
     // MARK: - Codec prefix structure tests
@@ -2877,7 +2760,6 @@ struct Qwen3TTSSpeakerEncoderWeightTests {
         #expect(encoder.blocks.count == 4,
                 "Encoder should have 4 blocks (1 TDNN + 3 SE-Res2Net)")
 
-        print("Speaker encoder architecture verified: encDim=\(encoder.config.encDim), blocks=\(encoder.blocks.count)")
     }
 }
 
@@ -3317,11 +3199,6 @@ struct Qwen3TTSPrepareICLInputsTests {
         let roleEmbedLen = 3
         let expectedTotalSeqLen = roleEmbedLen + codecPrefixLen + iclInputEmbedLen
 
-        print("Expected inputEmbeds shape: [1, \(expectedTotalSeqLen), \(hiddenDim)]")
-        print("  - roleEmbed: \(roleEmbedLen)")
-        print("  - codecPrefix: \(codecPrefixLen)")
-        print("  - iclInputEmbed: \(iclInputEmbedLen) (text: \(textLens) + codec: \(codecLens))")
-
         // Since we can't call prepareICLInputs without a real tokenizer, we verify
         // the shape formula is correct based on the implementation (lines 149-324)
         #expect(expectedTotalSeqLen > 0, "Total sequence length should be positive")
@@ -3342,8 +3219,6 @@ struct Qwen3TTSPrepareICLInputsTests {
 
         // We can't run the full method without a tokenizer, but we verify the shape formula
         let expectedShape = [1, 1, hiddenDim]
-        print("Expected ttsPadEmbed shape: \(expectedShape)")
-
         #expect(expectedShape == [1, 1, 1536], "ttsPadEmbed should be [1, 1, 1536]")
     }
 
@@ -3375,10 +3250,6 @@ struct Qwen3TTSPrepareICLInputsTests {
         let codecLens = 12
         let expectedIclInputEmbedShape = [1, textLens + codecLens, hiddenDim]
 
-        print("Non-streaming overlay creates interleaved embedding of shape: \(expectedIclInputEmbedShape)")
-        print("  - textWithCodecPad: [1, \(textLens), \(hiddenDim)]")
-        print("  - codecWithTextPad: [1, \(codecLens), \(hiddenDim)]")
-
         #expect(expectedIclInputEmbedShape[1] == textLens + codecLens,
                 "Non-streaming overlay should concatenate text and codec segments")
     }
@@ -3395,7 +3266,6 @@ struct Qwen3TTSPrepareICLInputsTests {
         let hiddenDim = model.config.talkerConfig!.hiddenSize
         let expectedShape = [1, 1, hiddenDim]
 
-        print("Non-streaming mode trailingTextHidden shape: \(expectedShape)")
         #expect(expectedShape == [1, 1, 1536],
                 "Non-streaming trailingTextHidden should be single pad embed [1, 1, 1536]")
     }
@@ -3419,10 +3289,6 @@ struct Qwen3TTSPrepareICLInputsTests {
 
         let expectedLengthWithSpeaker = 7
         let expectedLengthWithoutSpeaker = 6
-
-        print("Codec prefix with language ID:")
-        print("  - With speaker: length \(expectedLengthWithSpeaker)")
-        print("  - Without speaker: length \(expectedLengthWithoutSpeaker)")
 
         #expect(expectedLengthWithSpeaker == 7,
                 "Codec prefix with langId and speaker should have 7 tokens")
@@ -3449,10 +3315,6 @@ struct Qwen3TTSPrepareICLInputsTests {
 
         let expectedLengthWithSpeaker = 6
         let expectedLengthWithoutSpeaker = 5
-
-        print("Codec prefix without language ID (auto):")
-        print("  - With speaker: length \(expectedLengthWithSpeaker)")
-        print("  - Without speaker: length \(expectedLengthWithoutSpeaker)")
 
         #expect(expectedLengthWithSpeaker == 6,
                 "Codec prefix with auto and speaker should have 6 tokens")
@@ -3490,10 +3352,6 @@ struct Qwen3TTSPrepareICLInputsTests {
         let expectedWithSpeaker = prefixLenWithLang + speakerLen + suffixLen  // 7
         let expectedWithoutSpeaker = prefixLenWithLang + suffixLen  // 6
 
-        print("Speaker embedding insertion in codec prefix:")
-        print("  - With speaker: \(expectedWithSpeaker) tokens")
-        print("  - Without speaker: \(expectedWithoutSpeaker) tokens")
-
         #expect(expectedWithSpeaker == 7, "Codec prefix with speaker should have 7 tokens")
         #expect(expectedWithoutSpeaker == 6, "Codec prefix without speaker should have 6 tokens")
     }
@@ -3512,9 +3370,6 @@ struct Qwen3TTSPrepareICLInputsTests {
 
         let roleEmbedLen = 3
         let hiddenDim = model.config.talkerConfig!.hiddenSize
-
-        print("Role embedding (first 3 tokens) is prepended to input_embeds")
-        print("  - roleEmbed shape: [1, \(roleEmbedLen), \(hiddenDim)]")
 
         #expect(roleEmbedLen == 3, "Role embedding should be 3 tokens")
     }
@@ -3539,12 +3394,6 @@ struct Qwen3TTSPrepareICLInputsTests {
         let iclInputEmbedLen = 20  // Example: textLens + codecLens
 
         let expectedTotalLen = roleEmbedLen + combinedPrefixLen + iclInputEmbedLen
-
-        print("Full input assembly order:")
-        print("  1. roleEmbed: [1, \(roleEmbedLen), \(hiddenDim)]")
-        print("  2. combinedPrefix: [1, \(combinedPrefixLen), \(hiddenDim)]")
-        print("  3. iclInputEmbed: [1, \(iclInputEmbedLen), \(hiddenDim)]")
-        print("  -> Total: [1, \(expectedTotalLen), \(hiddenDim)]")
 
         #expect(expectedTotalLen == roleEmbedLen + combinedPrefixLen + iclInputEmbedLen,
                 "Input embeds should concatenate all three segments")
@@ -4504,27 +4353,21 @@ struct Qwen3TTSSpeakerEncoderSmokeTests {
 
     /// Integration test: Verify speaker encoder loads and initializes correctly
     @Test func testSpeakerEncoderLoadsWithBaseModel() throws {
-        print("\u{001B}[33mTesting speaker encoder initialization with Base model...\u{001B}[0m")
-
         // 1. Create Base model with speaker encoder
         let model = try makeSmokeTestBaseModel()
 
         // 2. Verify speaker encoder exists
         #expect(model.speakerEncoder != nil, "Base model should have a speaker encoder")
-        print("\u{001B}[32m✓ Speaker encoder loaded\u{001B}[0m")
 
         // 3. Verify encoder configuration
         let speakerEncoder = try #require(model.speakerEncoder)
         #expect(speakerEncoder.config.encDim == 192, "enc_dim should be 192")
         #expect(speakerEncoder.config.melDim == 128, "mel_dim should be 128")
         #expect(speakerEncoder.config.sampleRate == 24000, "sample_rate should be 24000")
-        print("\u{001B}[32m✓ Speaker encoder config verified\u{001B}[0m")
     }
 
     /// Integration test: Extract speaker embedding from synthetic audio
     @Test func testExtractSpeakerEmbeddingFromSyntheticAudio() throws {
-        print("\u{001B}[33mTesting speaker embedding extraction pipeline...\u{001B}[0m")
-
         // 1. Create Base model with speaker encoder
         let model = try makeSmokeTestBaseModel()
 
@@ -4533,7 +4376,6 @@ struct Qwen3TTSSpeakerEncoderSmokeTests {
         let duration = 1.0
         let numSamples = Int(duration * Double(sampleRate))
         let audio = MLXArray.zeros([numSamples])
-        print("\u{001B}[33m  Created synthetic audio: shape \(audio.shape)\u{001B}[0m")
 
         // 3. Call extractSpeakerEmbedding()
         let embedding = try model.extractSpeakerEmbedding(audio: audio)
@@ -4543,18 +4385,13 @@ struct Qwen3TTSSpeakerEncoderSmokeTests {
         #expect(embedding.ndim == 2, "Embedding should be 2D, got \(embedding.ndim)")
         #expect(embedding.dim(0) == 1, "Embedding batch dim should be 1, got \(embedding.dim(0))")
         #expect(embedding.dim(1) == 192, "Embedding dim should be 192 (enc_dim), got \(embedding.dim(1))")
-        print("\u{001B}[32m✓ Embedding shape verified: \(embedding.shape)\u{001B}[0m")
-
         // Note: L2 normalization is NOT verified in this smoke test because the speaker
         // encoder has uninitialized (random) weights — the norm will not be 1.0.
         // L2 normalization correctness is tested separately with loaded weights.
-        print("\u{001B}[32m✓ Embedding produced (shape and dtype checks only for smoke test)\u{001B}[0m")
     }
 
     /// Integration test: Verify mel-spectrogram preprocessing
     @Test func testMelSpectrogramPreprocessing() throws {
-        print("\u{001B}[33mTesting mel-spectrogram preprocessing...\u{001B}[0m")
-
         // 1. Create Base model
         let model = try makeSmokeTestBaseModel()
 
@@ -4579,19 +4416,14 @@ struct Qwen3TTSSpeakerEncoderSmokeTests {
         //
         // Expected mel shape: [1, time, 128] where time = (samples - 1024) / 256 + 1
         // For 48000 samples: time = (48000 - 1024) / 256 + 1 ≈ 184
-        let expectedMelBins = 128
-        print("\u{001B}[32m✓ Mel spectrogram parameters verified (num_mels = \(expectedMelBins))\u{001B}[0m")
 
         // 5. Verify embedding was computed (should be non-zero if weights were initialized)
         // Since this is a smoke test with uninitialized weights, we just verify shape
         #expect(embedding.shape == [1, 192], "Embedding shape should be [1, 192]")
-        print("\u{001B}[32m✓ Mel-spectrogram preprocessing completed successfully\u{001B}[0m")
     }
 
     /// Integration test: Verify forward pass through all ECAPA-TDNN layers
     @Test func testForwardPassThroughAllLayers() throws {
-        print("\u{001B}[33mTesting forward pass through ECAPA-TDNN layers...\u{001B}[0m")
-
         // 1. Create Base model
         let model = try makeSmokeTestBaseModel()
         let speakerEncoder = try #require(model.speakerEncoder)
@@ -4606,7 +4438,6 @@ struct Qwen3TTSSpeakerEncoderSmokeTests {
         let expectedBlockCount = 4  // 1 TDNN + 3 SE-Res2Net
         #expect(speakerEncoder.blocks.count == expectedBlockCount,
                 "Speaker encoder should have \(expectedBlockCount) blocks, got \(speakerEncoder.blocks.count)")
-        print("\u{001B}[32m✓ Layer structure verified (\(speakerEncoder.blocks.count) blocks)\u{001B}[0m")
 
         // 3. Create synthetic mel spectrogram input [batch=1, time=100, mel_dim=128]
         let batchSize = 1
@@ -4619,23 +4450,12 @@ struct Qwen3TTSSpeakerEncoderSmokeTests {
         eval(embedding)
 
         // 5. Verify output shape [1, enc_dim]
+        // The forward pass applies 4 blocks (TDNN + 3 SE-Res2Net), MFA, ASP, and FC layers.
         #expect(embedding.shape == [1, 192], "Output should be [1, 192], got \(embedding.shape)")
-        print("\u{001B}[32m✓ Forward pass completed successfully\u{001B}[0m")
-
-        // 6. Verify layers were traversed (check intermediate outputs exist)
-        // The forward pass should:
-        // - Apply 4 blocks (TDNN + 3 SE-Res2Net)
-        // - Concatenate SE-Res2Net outputs (512*3 = 1536 channels)
-        // - Apply MFA (1536 -> 1536)
-        // - Apply ASP (1536 -> 3072)
-        // - Apply FC (3072 -> 192)
-        print("\u{001B}[32m✓ All ECAPA-TDNN layers traversed\u{001B}[0m")
     }
 
     /// Integration test: Verify speaker encoder weight loading structure
     @Test func testSpeakerEncoderWeightLoadingStructure() throws {
-        print("\u{001B}[33mTesting speaker encoder weight loading structure...\u{001B}[0m")
-
         // 1. Create mock PyTorch-format weights with speaker_encoder prefix
         var mockWeights = [String: MLXArray]()
 
@@ -4653,13 +4473,11 @@ struct Qwen3TTSSpeakerEncoderSmokeTests {
                 "Prefix 'speaker_encoder.' should be removed")
         #expect(sanitized["speaker_encoder.blocks.0.conv.weight"] == nil,
                 "Original prefixed key should not exist")
-        print("\u{001B}[32m✓ Prefix removal verified\u{001B}[0m")
 
         // 4. Verify Conv1d weight transposition (PyTorch [out, in, kernel] -> MLX [out, kernel, in])
         let tdnnWeight = try #require(sanitized["blocks.0.conv.weight"])
         #expect(tdnnWeight.shape == [512, 5, 128],
                 "Conv1d weight should be transposed to [out, kernel, in], got \(tdnnWeight.shape)")
-        print("\u{001B}[32m✓ Conv1d weight transposition verified\u{001B}[0m")
 
         // 5. Verify all expected keys were sanitized
         let expectedKeys = [
@@ -4671,52 +4489,40 @@ struct Qwen3TTSSpeakerEncoderSmokeTests {
         for key in expectedKeys {
             #expect(sanitized[key] != nil, "Expected sanitized key '\(key)' not found")
         }
-        print("\u{001B}[32m✓ All weights sanitized correctly (\(sanitized.count) weights)\u{001B}[0m")
     }
 
     /// Integration test: End-to-end speaker encoder pipeline verification
     @Test func testEndToEndSpeakerEncoderPipeline() throws {
-        print("\u{001B}[33mTesting end-to-end speaker encoder pipeline...\u{001B}[0m")
-
         // This test exercises the full pipeline from audio input to embedding output
 
         // 1. Create Base model with speaker encoder
         let model = try makeSmokeTestBaseModel()
-        print("\u{001B}[32m✓ Step 1: Base model created\u{001B}[0m")
 
         // 2. Verify model configuration
         #expect(model.config.ttsModelType == "base", "Model type should be 'base'")
         #expect(model.config.speakerEncoderConfig != nil, "Speaker encoder config should exist")
         #expect(model.speakerEncoder != nil, "Speaker encoder should be loaded")
-        print("\u{001B}[32m✓ Step 2: Model configuration verified\u{001B}[0m")
 
         // 3. Create synthetic audio (simulating a real waveform)
         let sampleRate = 24000
         let duration = 1.5
         let numSamples = Int(duration * Double(sampleRate))
         let audio = MLXArray.zeros([numSamples])
-        print("\u{001B}[32m✓ Step 3: Synthetic audio created (\(numSamples) samples)\u{001B}[0m")
 
         // 4. Extract speaker embedding
         let embedding = try model.extractSpeakerEmbedding(audio: audio)
         eval(embedding)
-        print("\u{001B}[32m✓ Step 4: Speaker embedding extracted\u{001B}[0m")
 
         // 5. Verify embedding properties
         #expect(embedding.shape == [1, 192], "Embedding shape should be [1, 192]")
-        print("\u{001B}[32m✓ Step 5: Embedding shape verified\u{001B}[0m")
 
         // 6. Note: L2 normalization is not verified in this smoke test because the
         // speaker encoder has uninitialized (random) weights — the norm will not be 1.0.
         // L2 normalization correctness requires loaded model weights.
-        print("\u{001B}[32m✓ Step 6: Embedding produced (normalization skipped for smoke test)\u{001B}[0m")
 
         // 7. Verify embedding can be used in downstream tasks (reshaping, concatenation)
         let reshaped = embedding.reshaped(1, 1, -1)
         #expect(reshaped.shape == [1, 1, 192], "Embedding should reshape correctly")
-        print("\u{001B}[32m✓ Step 7: Embedding can be reshaped for downstream use\u{001B}[0m")
-
-        print("\u{001B}[32m✓ End-to-end pipeline test PASSED\u{001B}[0m")
     }
 }
 

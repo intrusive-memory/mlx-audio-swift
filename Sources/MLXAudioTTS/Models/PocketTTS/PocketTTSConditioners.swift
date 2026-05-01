@@ -22,6 +22,20 @@ public final class SentencePieceTokenizer {
         self.tokenizer = try UnigramTokenizer(tokenizerJSON: json)
     }
 
+    /// Testing-only init: constructs a SentencePieceTokenizer with a minimal single-entry
+    /// vocabulary. No file I/O occurs. Intended for CI-safe unit tests only.
+    internal init(__testStub nBins: Int) {
+        // Build a minimal tokenizer JSON with one vocab entry so UnigramTokenizer inits without error.
+        let stubJSON: [String: Any] = [
+            "model": [
+                "unk_id": 0,
+                "vocab": [["<unk>", -100.0]]
+            ]
+        ]
+        // Force-try: the hardcoded JSON above is always valid.
+        self.tokenizer = try! UnigramTokenizer(tokenizerJSON: stubJSON)
+    }
+
     /// Synchronous variant — no actual async work; used inside `loadWithAcervoStrict` closure.
     public init(nBins: Int, modelFolderSync modelFolder: URL) throws {
         let tokenizerJSON = modelFolder.appendingPathComponent("tokenizer.json")
@@ -59,6 +73,21 @@ public final class LUTConditioner: Module {
 
     @ModuleInfo(key: "embed") public var embed: Embedding
     @ModuleInfo(key: "output_proj") public var output_proj: Linear?
+
+    /// Testing-only init: constructs a LUTConditioner backed by a stub tokenizer.
+    /// No file I/O occurs. Intended for CI-safe unit tests only.
+    internal init(nBins: Int, dim: Int, outputDim: Int) {
+        self.tokenizer = SentencePieceTokenizer(__testStub: nBins)
+        self.dim = dim
+        self.outputDim = outputDim
+        self._embed = ModuleInfo(wrappedValue: Embedding(embeddingCount: nBins + 1, dimensions: dim))
+        if dim == outputDim {
+            self._output_proj = ModuleInfo(wrappedValue: nil)
+        } else {
+            self._output_proj = ModuleInfo(wrappedValue: Linear(dim, outputDim, bias: false))
+        }
+        super.init()
+    }
 
     public init(nBins: Int, modelFolder: URL, dim: Int, outputDim: Int) async throws {
         self.tokenizer = try await SentencePieceTokenizer(nBins: nBins, modelFolder: modelFolder)

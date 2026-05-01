@@ -757,7 +757,11 @@ public class Qwen3ASRModel: Module {
 
     // MARK: - Audio-Text Merging
 
-    private func mergeAudioFeatures(
+    /// Replace audio-token slots in `inputsEmbeds` with rows from `audioFeatures`.
+    /// Exposed as `internal` (not `public`) so KV-cache parity tests in the test
+    /// target can reach it via `@testable import MLXAudioSTT`. Not part of the
+    /// public API — see FOLLOW_UP.md P2.
+    internal func mergeAudioFeatures(
         inputsEmbeds: MLXArray,
         audioFeatures: MLXArray,
         inputIds: MLXArray

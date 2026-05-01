@@ -134,7 +134,7 @@ public class ISTFTHead: Module {
                 for j in 0..<min(nFft, frameData.count) {
                     if start + j < outputLength {
                         audioSamples[start + j] += frameData[j]
-                        windowSum[start + j] += windowArray[j]
+                        windowSum[start + j] += windowArray[j] * windowArray[j]
                     }
                 }
             }
@@ -159,10 +159,7 @@ public class ISTFTHead: Module {
             outputs.append(MLXArray(trimmedAudio))
         }
 
-        // Stack outputs
-        if outputs.count == 1 {
-            return outputs[0]
-        }
+        // Stack outputs — always preserve batch dimension
         return MLX.stacked(outputs, axis: 0)
     }
 
@@ -172,7 +169,7 @@ public class ISTFTHead: Module {
             return MLXArray([Float(1.0)])
         }
         let n = Array(stride(from: 0, to: length, by: 1)).map { Float($0) }
-        let factor = Float.pi / Float(length - 1)
+        let factor = Float.pi / Float(length)
         let window = n.map { 0.5 - 0.5 * cos(2.0 * factor * $0) }
         return MLXArray(window)
     }
