@@ -45,6 +45,9 @@ EXPECTED_SUITES=(
   "Qwen3ASRTests"
   "GLMASRTests"
   "MarvisTTSGenerateTests"
+  "DeterministicGenerationTests"
+  "KVCacheCorrectnessTests"
+  "WeightRoundTripTests"
 )
 
 MISSING=()

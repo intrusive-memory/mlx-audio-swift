@@ -488,30 +488,6 @@ struct Qwen3TTSSpeechTokenizerWeightTests {
 
 struct Qwen3TTSLanguageTests {
 
-    /// Test ISO 639-1 code "en" resolves to "english" without config
-    @Test func testResolveLanguageEnglishISO() {
-        let result = Qwen3TTSModel.resolveLanguage("en")
-        #expect(result == "english", "ISO code 'en' should resolve to 'english'")
-    }
-
-    /// Test ISO 639-1 code "zh" resolves to "chinese" without config
-    @Test func testResolveLanguageChineseISO() {
-        let result = Qwen3TTSModel.resolveLanguage("zh")
-        #expect(result == "chinese", "ISO code 'zh' should resolve to 'chinese'")
-    }
-
-    /// Test ISO 639-1 code "ja" resolves to "japanese" without config
-    @Test func testResolveLanguageJapaneseISO() {
-        let result = Qwen3TTSModel.resolveLanguage("ja")
-        #expect(result == "japanese", "ISO code 'ja' should resolve to 'japanese'")
-    }
-
-    /// Test ISO 639-1 code "ko" resolves to "korean" without config
-    @Test func testResolveLanguageKoreanISO() {
-        let result = Qwen3TTSModel.resolveLanguage("ko")
-        #expect(result == "korean", "ISO code 'ko' should resolve to 'korean'")
-    }
-
     /// Test all supported ISO 639-1 codes resolve correctly (Task 4 requirement: 30+ languages)
     @Test func testResolveLanguageAllISO() {
         // Test 30+ ISO 639-1 codes as required by Task 4
@@ -582,12 +558,6 @@ struct Qwen3TTSLanguageTests {
     @Test func testResolveLanguageFullNamePassthrough() {
         let result = Qwen3TTSModel.resolveLanguage("english")
         #expect(result == "english", "Full language name 'english' should pass through")
-    }
-
-    /// Test full language name "chinese" passes through without config
-    @Test func testResolveLanguageChineseFullName() {
-        let result = Qwen3TTSModel.resolveLanguage("chinese")
-        #expect(result == "chinese", "Full language name 'chinese' should pass through")
     }
 
     /// Test "auto" passes through as a special value
@@ -1294,93 +1264,6 @@ struct Qwen3TTSPrepareBaseInputsTests {
         // structure here.
         #expect(config.spkId?["Serena"] == nil,
                 "Direct lookup with uppercase should not match (case-sensitive dict)")
-    }
-
-    // MARK: - Dialect override logic verification
-
-    /// Test dialect override: Eric with Chinese language should switch to sichuan_dialect
-    @Test func testDialectOverrideEricChinese() throws {
-        let json = Qwen3TTSConfigTests.customVoiceConfigJSON.data(using: .utf8)!
-        let config = try JSONDecoder().decode(Qwen3TTSModelConfig.self, from: json)
-        let talkerConfig = config.talkerConfig!
-
-        // Simulate the dialect override logic from prepareBaseInputs
-        let speaker = "eric"
-        var effectiveLanguage = "chinese"
-
-        if let dialectMap = talkerConfig.spkIsDialect,
-           let dialect = dialectMap[speaker.lowercased()],
-           (effectiveLanguage.lowercased() == "chinese" || effectiveLanguage.lowercased() == "auto"),
-           let langMap = talkerConfig.codecLanguageId,
-           langMap[dialect] != nil {
-            effectiveLanguage = dialect
-        }
-
-        #expect(effectiveLanguage == "sichuan_dialect",
-                "Eric with Chinese language should be overridden to sichuan_dialect")
-    }
-
-    /// Test dialect override: Eric with English language should NOT be overridden
-    @Test func testDialectOverrideEricEnglish() throws {
-        let json = Qwen3TTSConfigTests.customVoiceConfigJSON.data(using: .utf8)!
-        let config = try JSONDecoder().decode(Qwen3TTSModelConfig.self, from: json)
-        let talkerConfig = config.talkerConfig!
-
-        let speaker = "eric"
-        var effectiveLanguage = "english"
-
-        if let dialectMap = talkerConfig.spkIsDialect,
-           let dialect = dialectMap[speaker.lowercased()],
-           (effectiveLanguage.lowercased() == "chinese" || effectiveLanguage.lowercased() == "auto"),
-           let langMap = talkerConfig.codecLanguageId,
-           langMap[dialect] != nil {
-            effectiveLanguage = dialect
-        }
-
-        #expect(effectiveLanguage == "english",
-                "Eric with English language should NOT be overridden to sichuan_dialect")
-    }
-
-    /// Test dialect override: Dylan with auto language should switch to beijing_dialect
-    @Test func testDialectOverrideDylanAuto() throws {
-        let json = Qwen3TTSConfigTests.customVoiceConfigJSON.data(using: .utf8)!
-        let config = try JSONDecoder().decode(Qwen3TTSModelConfig.self, from: json)
-        let talkerConfig = config.talkerConfig!
-
-        let speaker = "dylan"
-        var effectiveLanguage = "auto"
-
-        if let dialectMap = talkerConfig.spkIsDialect,
-           let dialect = dialectMap[speaker.lowercased()],
-           (effectiveLanguage.lowercased() == "chinese" || effectiveLanguage.lowercased() == "auto"),
-           let langMap = talkerConfig.codecLanguageId,
-           langMap[dialect] != nil {
-            effectiveLanguage = dialect
-        }
-
-        #expect(effectiveLanguage == "beijing_dialect",
-                "Dylan with auto language should be overridden to beijing_dialect")
-    }
-
-    /// Test dialect override: Serena (no dialect) should NOT be overridden
-    @Test func testDialectOverrideSerena() throws {
-        let json = Qwen3TTSConfigTests.customVoiceConfigJSON.data(using: .utf8)!
-        let config = try JSONDecoder().decode(Qwen3TTSModelConfig.self, from: json)
-        let talkerConfig = config.talkerConfig!
-
-        let speaker = "serena"
-        var effectiveLanguage = "chinese"
-
-        if let dialectMap = talkerConfig.spkIsDialect,
-           let dialect = dialectMap[speaker.lowercased()],
-           (effectiveLanguage.lowercased() == "chinese" || effectiveLanguage.lowercased() == "auto"),
-           let langMap = talkerConfig.codecLanguageId,
-           langMap[dialect] != nil {
-            effectiveLanguage = dialect
-        }
-
-        #expect(effectiveLanguage == "chinese",
-                "Serena has no dialect entry, language should remain chinese")
     }
 
     // MARK: - Codec prefix structure tests

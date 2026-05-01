@@ -1011,26 +1011,6 @@ struct ComponentDescriptorTests {
         #expect(repoId == "kyutai/moshiko-pytorch-bf16", "Mimi should use kyutai/moshiko-pytorch-bf16 repo")
     }
 
-    @Test func testSNACComponentType() {
-        // Verify SNAC is registered as a decoder component
-        SNAC.ensureComponentsRegistered()
-
-        // The component type is .decoder as specified in SNACModelManager
-        // This test verifies the constant is correct at runtime
-        let componentType = "decoder"  // From ComponentDescriptor(type: .decoder, ...)
-        #expect(componentType == "decoder", "SNAC should be a decoder component")
-    }
-
-    @Test func testMimiComponentType() {
-        // Verify Mimi is registered as a decoder component
-        Mimi.ensureComponentsRegistered()
-
-        // The component type is .decoder as specified in MimiModelManager
-        // This test verifies the constant is correct at runtime
-        let componentType = "decoder"  // From ComponentDescriptor(type: .decoder, ...)
-        #expect(componentType == "decoder", "Mimi should be a decoder component")
-    }
-
     @Test func testBothComponentsCanBeRegisteredTogether() {
         // Verify both SNAC and Mimi can be registered without conflicts
         SNAC.ensureComponentsRegistered()
