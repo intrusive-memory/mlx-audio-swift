@@ -25,21 +25,21 @@
 //  That criterion is N/A here. Neither `saveAudioArray` nor `loadAudioArray`
 //  exposes an Int16 PCM write path — both produce and consume float32 WAV files.
 //
-//  # Known production behavior: saveAudioArray truncates to multiples of 1024 samples
+//  # Historical note: saveAudioArray 1024-sample truncation
 //
-//  Investigation during Sortie 14 revealed that `saveAudioArray` silently truncates
-//  the output to a multiple of 1024 samples when the input length is not already
-//  a multiple of 1024. `intention.wav` has 36480 samples; after save/reload the
-//  recovered length is 35840 (= 35 × 1024), a loss of 640 samples (~26.7 ms).
+//  Sortie 14 found that `saveAudioArray` silently truncated output to the nearest
+//  multiple of 1024 samples (intention.wav 36480 → 35840, losing ~26.7 ms at
+//  24 kHz). The truncation was traced to AVAudioFile's 2-arg `forWriting:` init
+//  letting `processingFormat` differ from the buffer's format, which triggered an
+//  internal conversion at write that quantized to 1024-frame packet boundaries
+//  and dropped the trailing partial packet.
 //
-//  This is a production-code bug, but per the sortie discipline we DO NOT modify
-//  Sources/ files. The `intentionWav_loadSaveReload_float32Allclose` test documents
-//  this behavior with an explicit finding note and skips the allclose assertion when
-//  sample counts differ (to avoid a fatal MLX broadcast error on mismatched shapes).
-//
-//  The `synthetic_float32_saveAudioArray_loadAudioArray_allclose` test uses an
-//  input length of exactly 1024 samples, which is a multiple of 1024, so no
-//  truncation occurs and the allclose assertion executes normally.
+//  Resolved in the OPERATION ECHO DRAGNET follow-up by switching `saveAudioArray`
+//  to the 4-arg `forWriting:settings:commonFormat:interleaved:` init (matching the
+//  pattern in `AudioUtils.writeWavFile`) and forcing the file to close+flush
+//  before the function returns. The round-trip now asserts byte-exact sample
+//  counts and full-range float32 allclose on `intention.wav` (non-1024-aligned
+//  input) without the prior `withKnownIssue` wrapper.
 //
 //  # Fixture
 //
@@ -130,26 +130,20 @@ struct AudioIORoundTripTests {
                 "Round-trip sample rate mismatch: original=\(originalSampleRate), reloaded=\(reloadedSampleRate)")
 
         // Assert sample count preserved.
-        // KNOWN PRODUCTION BUG: saveAudioArray silently truncates output to the nearest
-        // multiple of 1024 samples. For `intention.wav` (36480 samples), the reloaded
-        // count is 35840 (= 35 × 1024), a loss of 640 samples (~26.7 ms at 24 kHz).
-        // This is tracked as a known issue using withKnownIssue so the suite exits 0
-        // while still surfacing the bug in test reports. Fix requires Sources/ edit
-        // which is out-of-scope for Sortie 14.
+        // Sortie 14 originally found that saveAudioArray silently truncated output
+        // to the nearest multiple of 1024 samples (intention.wav 36480 → 35840,
+        // losing ~26.7 ms at 24 kHz). Root cause was AVAudioFile's 2-arg
+        // forWriting initializer letting processingFormat differ from the buffer
+        // format, triggering a conversion at write that dropped the trailing
+        // partial packet. Fixed by switching to the 4-arg init in AudioUtils.swift
+        // and forcing the file to close+flush before saveAudioArray returns.
         let reloadedSampleCount = reloadedArray.shape[0]
-        withKnownIssue("saveAudioArray truncates output to multiples of 1024 samples (production bug)") {
-            #expect(reloadedSampleCount == originalSampleCount,
-                    "Round-trip sample count: original=\(originalSampleCount), reloaded=\(reloadedSampleCount)")
-        }
+        #expect(reloadedSampleCount == originalSampleCount,
+                "Round-trip sample count: original=\(originalSampleCount), reloaded=\(reloadedSampleCount)")
 
-        // Assert float32 allclose(atol: 1e-6) on the overlapping prefix only.
-        // We use min(original, reloaded) to avoid a fatal MLX broadcast crash when
-        // the counts differ due to the truncation bug above.
-        let overlapCount = min(originalSampleCount, reloadedSampleCount)
-        guard overlapCount > 0 else { return }
-
-        let originalPrefix = originalArray[0..<overlapCount]
-        let reloadedPrefix = reloadedArray[0..<overlapCount]
+        // Assert float32 allclose(atol: 1e-6) on the full sample range.
+        let originalPrefix = originalArray
+        let reloadedPrefix = reloadedArray
         eval(originalPrefix, reloadedPrefix)
 
         let diff = MLX.abs(originalPrefix - reloadedPrefix)
@@ -157,7 +151,7 @@ struct AudioIORoundTripTests {
         let allClose = MLX.all(diff .<= Float(1e-6)).item(Bool.self)
 
         #expect(allClose,
-                "Round-trip float32 allclose(atol:1e-6) on overlap prefix failed; maxAbsDiff=\(maxDiff)")
+                "Round-trip float32 allclose(atol:1e-6) failed; maxAbsDiff=\(maxDiff)")
     }
 
     // MARK: - Synthetic float32 round-trip (saveAudioArray / loadAudioArray)

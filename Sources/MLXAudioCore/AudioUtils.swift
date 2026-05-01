@@ -40,7 +40,17 @@ public class AudioUtils {
 
 
 /// Load audio from a file and return the sample rate and audio data.
+///
+/// For WAV files, parses the RIFF/WAVE header directly and decodes Int16 PCM,
+/// Int32 PCM, or IEEE float samples to Float32. AVAudioFile.read(into:) silently
+/// truncates to 1024-frame boundaries for non-aligned file lengths (Sortie 14
+/// finding, originally mis-attributed to saveAudioArray); the hand-rolled WAV
+/// path avoids that. Non-WAV containers fall back to AVAudioFile.
 public func loadAudioArray(from url: URL) throws -> (Int, MLXArray) {
+    if let wav = try readWavFile(at: url) {
+        return wav
+    }
+
     let audioFile = try AVAudioFile(forReading: url)
     let format = audioFile.processingFormat
     let frameCount = AVAudioFrameCount(audioFile.length)
@@ -60,6 +70,120 @@ public func loadAudioArray(from url: URL) throws -> (Int, MLXArray) {
     let audioData = MLXArray(samples)
 
     return (sampleRate, audioData)
+}
+
+/// Hand-rolled RIFF/WAVE reader. Returns nil if the file isn't a WAV (caller
+/// falls back to AVAudioFile). Throws if the file has a WAV signature but is
+/// malformed or uses an unsupported format.
+private func readWavFile(at url: URL) throws -> (Int, MLXArray)? {
+    let data = try Data(contentsOf: url)
+    guard data.count >= 44 else { return nil }
+    guard data.readASCII(at: 0, count: 4) == "RIFF",
+          data.readASCII(at: 8, count: 4) == "WAVE" else {
+        return nil
+    }
+
+    var formatCode: UInt16 = 0
+    var channels: UInt16 = 0
+    var sampleRate: UInt32 = 0
+    var bitsPerSample: UInt16 = 0
+    var dataOffset: Int? = nil
+    var dataLength: Int = 0
+
+    var cursor = 12
+    while cursor + 8 <= data.count {
+        let chunkID = data.readASCII(at: cursor, count: 4)
+        let chunkSize = Int(data.readLEUInt32(at: cursor + 4))
+        let bodyStart = cursor + 8
+
+        switch chunkID {
+        case "fmt ":
+            guard chunkSize >= 16 else {
+                throw NSError(domain: "AudioUtils", code: 10, userInfo: [NSLocalizedDescriptionKey: "WAV fmt chunk too small"])
+            }
+            formatCode = data.readLEUInt16(at: bodyStart)
+            channels = data.readLEUInt16(at: bodyStart + 2)
+            sampleRate = data.readLEUInt32(at: bodyStart + 4)
+            bitsPerSample = data.readLEUInt16(at: bodyStart + 14)
+        case "data":
+            dataOffset = bodyStart
+            dataLength = chunkSize
+        default:
+            break
+        }
+
+        // Chunks are word-aligned: skip an extra byte if chunkSize is odd.
+        cursor = bodyStart + chunkSize + (chunkSize & 1)
+        if dataOffset != nil { break }
+    }
+
+    guard let dataStart = dataOffset, channels > 0, bitsPerSample > 0, sampleRate > 0 else {
+        throw NSError(domain: "AudioUtils", code: 11, userInfo: [NSLocalizedDescriptionKey: "WAV missing fmt or data chunk"])
+    }
+
+    let bytesPerSample = Int(bitsPerSample / 8)
+    let frameStride = bytesPerSample * Int(channels)
+    let frameCount = dataLength / frameStride
+    let dataEnd = dataStart + frameCount * frameStride
+    guard dataEnd <= data.count else {
+        throw NSError(domain: "AudioUtils", code: 12, userInfo: [NSLocalizedDescriptionKey: "WAV data chunk overruns file"])
+    }
+
+    var samples = [Float](repeating: 0, count: frameCount)
+    data.withUnsafeBytes { (raw: UnsafeRawBufferPointer) in
+        guard let base = raw.baseAddress else { return }
+        let payload = base.advanced(by: dataStart)
+        switch (formatCode, bitsPerSample) {
+        case (1, 16):
+            let int16Ptr = payload.assumingMemoryBound(to: Int16.self)
+            let scale = Float(1.0 / 32768.0)
+            for i in 0..<frameCount {
+                samples[i] = Float(int16Ptr[i * Int(channels)].littleEndian) * scale
+            }
+        case (1, 32):
+            let int32Ptr = payload.assumingMemoryBound(to: Int32.self)
+            let scale = Float(1.0 / 2_147_483_648.0)
+            for i in 0..<frameCount {
+                samples[i] = Float(int32Ptr[i * Int(channels)].littleEndian) * scale
+            }
+        case (3, 32):
+            let floatPtr = payload.assumingMemoryBound(to: Float.self)
+            for i in 0..<frameCount {
+                samples[i] = floatPtr[i * Int(channels)]
+            }
+        default:
+            samples = []
+        }
+    }
+
+    if samples.isEmpty && frameCount > 0 {
+        throw NSError(domain: "AudioUtils", code: 13, userInfo: [
+            NSLocalizedDescriptionKey: "WAV format unsupported: code=\(formatCode), bits=\(bitsPerSample)"
+        ])
+    }
+
+    return (Int(sampleRate), MLXArray(samples))
+}
+
+private extension Data {
+    func readASCII(at offset: Int, count: Int) -> String {
+        guard offset + count <= self.count else { return "" }
+        return String(decoding: self[offset..<offset + count], as: UTF8.self)
+    }
+
+    func readLEUInt16(at offset: Int) -> UInt16 {
+        let lo = UInt16(self[offset])
+        let hi = UInt16(self[offset + 1])
+        return (hi << 8) | lo
+    }
+
+    func readLEUInt32(at offset: Int) -> UInt32 {
+        let b0 = UInt32(self[offset])
+        let b1 = UInt32(self[offset + 1])
+        let b2 = UInt32(self[offset + 2])
+        let b3 = UInt32(self[offset + 3])
+        return (b3 << 24) | (b2 << 16) | (b1 << 8) | b0
+    }
 }
 
 /// Save audio data to a WAV file.
