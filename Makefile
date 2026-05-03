@@ -6,12 +6,20 @@ DESTINATION = 'platform=macOS'
 XCODEBUILD = xcodebuild
 CODE_SIGNING = CODE_SIGNING_ALLOWED=NO
 
-# CI-safe test suites (no model downloads)
+# CI-safe test suites (no model downloads).
+# Each suite here is verified zero-download (no fromPretrained / Acervo /
+# ensureComponentReady / loadModel calls). The local-only counterpart list
+# lives in bin/check-local-only-suites.sh and CLAUDE.md.
 CI_TESTS = \
 	-only-testing:MLXAudioTests/VocosTests \
 	-only-testing:MLXAudioTests/EncodecTests \
 	-only-testing:MLXAudioTests/DACVAETests \
+	-only-testing:MLXAudioTests/DACVAEWatermarkerTests \
+	-only-testing:MLXAudioTests/MimiLayerTests \
+	-only-testing:MLXAudioTests/SNACVQTests \
+	-only-testing:MLXAudioTests/ConvWeightedTests \
 	-only-testing:MLXAudioTests/GLMASRModuleSetupTests \
+	-only-testing:MLXAudioTests/GLMASRModelTests \
 	-only-testing:MLXAudioTests/Qwen3ASRModuleSetupTests \
 	-only-testing:MLXAudioTests/ForceAlignProcessorTests \
 	-only-testing:MLXAudioTests/ForcedAlignResultTests \
@@ -19,13 +27,27 @@ CI_TESTS = \
 	-only-testing:MLXAudioTests/SplitAudioIntoChunksTests \
 	-only-testing:MLXAudioTests/Qwen3TTSSpeechTokenizerTests \
 	-only-testing:MLXAudioTests/Qwen3TTSSpeechTokenizerEncodeTests \
+	-only-testing:MLXAudioTests/Qwen3TTSSpeechTokenizerWeightTests \
 	-only-testing:MLXAudioTests/Qwen3TTSLanguageTests \
 	-only-testing:MLXAudioTests/Qwen3TTSConfigTests \
+	-only-testing:MLXAudioTests/Qwen3TTSConfigDimensionTests \
 	-only-testing:MLXAudioTests/Qwen3TTSRoutingTests \
 	-only-testing:MLXAudioTests/Qwen3TTSPrepareBaseInputsTests \
+	-only-testing:MLXAudioTests/Qwen3TTSPrepareICLInputsTests \
+	-only-testing:MLXAudioTests/Qwen3TTSGenerateICLTests \
+	-only-testing:MLXAudioTests/Qwen3TTSGenerateCustomVoiceTests \
 	-only-testing:MLXAudioTests/Qwen3TTSSpeakerEncoderTests \
 	-only-testing:MLXAudioTests/Qwen3TTSSpeakerEncoderWeightTests \
-	-only-testing:MLXAudioTests/Qwen3TTSSpeakerEmbeddingTests
+	-only-testing:MLXAudioTests/Qwen3TTSSpeakerEmbeddingTests \
+	-only-testing:MLXAudioTests/LlamaTTSModuleSetupTests \
+	-only-testing:MLXAudioTests/PocketTTSModuleSetupTests \
+	-only-testing:MLXAudioTests/SopranoModuleSetupTests \
+	-only-testing:MLXAudioTests/MLXAudioCoreDSPTests \
+	-only-testing:MLXAudioTests/ModelUtilsTests \
+	-only-testing:MLXAudioTests/AudioUtilsTests \
+	-only-testing:MLXAudioTests/AudioIORoundTripTests \
+	-only-testing:MLXAudioTests/UnigramTokenizerRoundTripTests \
+	-only-testing:MLXAudioTests/ParityFixtureLoaderSmokeTests
 
 .PHONY: help build test test-ci test-all clean archive format lint
 

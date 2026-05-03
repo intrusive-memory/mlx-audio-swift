@@ -1,0 +1,11 @@
+{
+  "_comment": "PLACEHOLDER — PocketTTS PARTIAL. PocketTTS is a flow-matching model (not autoregressive over discrete tokens). It does not yield individual token IDs from generateStream. Instead, this fixture records expected audio sample count for determinism validation. Regenerate by running DeterministicGenerationTests/pocketTTSDeterministic locally with mlx-models-v2 cache.",
+  "_regenerate": "xcodebuild test -scheme MLXAudio-Package -destination 'platform=macOS' -only-testing:MLXAudioTests/DeterministicGenerationTests CODE_SIGNING_ALLOWED=NO",
+  "_model": "mlx-community/pocket-tts",
+  "_prompt": "Hello, this is a deterministic seed test.",
+  "_voice": "alba",
+  "_seed": 42,
+  "_note": "PocketTTS uses flow-matching (continuous latents), so token_ids is always empty. Audio sample count is used as the determinism proxy instead.",
+  "expected_token_ids": [],
+  "expected_audio_sample_count": 0
+}

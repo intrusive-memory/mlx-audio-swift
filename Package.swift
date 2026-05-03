@@ -1,5 +1,20 @@
 // swift-tools-version:6.2
+import Foundation
 import PackageDescription
+
+// In CI we always pin to released remotes. Locally, prefer a sibling checkout
+// at ../<name> if present so in-flight changes can be exercised end-to-end
+// without publishing a release. Falls back to the remote pin if the sibling
+// directory is missing, so fresh clones still build.
+let useLocalSiblings = ProcessInfo.processInfo.environment["CI"] != "true"
+
+func sibling(_ name: String, remote: String, from version: Version) -> Package.Dependency {
+    let localPath = "../\(name)"
+    if useLocalSiblings && FileManager.default.fileExists(atPath: localPath) {
+        return .package(path: localPath)
+    }
+    return .package(url: remote, .upToNextMajor(from: version))
+}
 
 let package = Package(
     name: "MLXAudio",
@@ -37,12 +52,12 @@ let package = Package(
         .package(url: "https://github.com/ml-explore/mlx-swift.git", .upToNextMajor(from: "0.31.3")),
         .package(url: "https://github.com/ml-explore/mlx-swift-lm.git", .upToNextMajor(from: "3.31.3")),
         .package(url: "https://github.com/DePasqualeOrg/swift-tokenizers-mlx", .upToNextMajor(from: "0.2.0"), traits: ["Swift"]),
-        .package(url: "https://github.com/DePasqualeOrg/swift-tokenizers.git", .upToNextMajor(from: "0.3.2"), traits: ["Swift"]),
-        .package(url: "https://github.com/intrusive-memory/SwiftAcervo.git", .upToNextMajor(from: "0.7.2")),
+        .package(url: "https://github.com/DePasqualeOrg/swift-tokenizers.git", .upToNextMajor(from: "0.4.3"), traits: ["Swift"]),
+        sibling("SwiftAcervo", remote: "https://github.com/intrusive-memory/SwiftAcervo.git", from: "0.8.4"),
         // Transitive dependencies for Xcode 26 compatibility
         .package(url: "https://github.com/apple/swift-numerics", .upToNextMajor(from: "1.1.1")),
         .package(url: "https://github.com/apple/swift-collections.git", .upToNextMajor(from: "1.4.1")),
-        .package(url: "https://github.com/apple/swift-crypto.git", .upToNextMajor(from: "4.4.0")),
+        .package(url: "https://github.com/apple/swift-crypto.git", .upToNextMajor(from: "4.5.0")),
         .package(url: "https://github.com/ibireme/yyjson.git", .upToNextMajor(from: "0.12.0")),
     ],
     targets: [
