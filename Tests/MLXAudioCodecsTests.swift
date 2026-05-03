@@ -8,8 +8,7 @@
 
 import Testing
 import MLX
-import Foundation
-import MLX
+import MLXNN
 import Foundation
 
 @testable import MLXAudioCore
@@ -37,36 +36,24 @@ struct SNACTests {
     @Test func testSNACEncodeDecodeCycle() async throws {
         // 1. Load audio from file
         let audioURL = Bundle.module.url(forResource: "intention", withExtension: "wav", subdirectory: "media")!
-        let (sampleRate, audioData) = try loadAudioArray(from: audioURL)
-        print("Loaded audio: \(audioData.shape), sample rate: \(sampleRate)")
+        let (_, audioData) = try loadAudioArray(from: audioURL)
 
         // 2. Load SNAC model from HuggingFace (24kHz model)
-        print("\u{001B}[33mLoading SNAC model...\u{001B}[0m")
         let snac = try await SNAC.fromPretrained("mlx-community/snac_24khz")
-        print("\u{001B}[32mSNAC model loaded!\u{001B}[0m")
 
         // 3. Reshape audio for SNAC: [batch, channels, samples]
         let audioInput = audioData.reshaped([1, 1, audioData.shape[0]])
-        print("Audio input shape: \(audioInput.shape)")
 
         // 4. Encode audio to codes
-        print("\u{001B}[33mEncoding audio...\u{001B}[0m")
         let codes = snac.encode(audioInput)
-        print("Encoded to \(codes.count) codebook levels:")
-        for (i, code) in codes.enumerated() {
-            print("  Level \(i): \(code.shape)")
-        }
 
         // 5. Decode codes back to audio
-        print("\u{001B}[33mDecoding audio...\u{001B}[0m")
         let reconstructed = snac.decode(codes)
-        print("Reconstructed audio shape: \(reconstructed.shape)")
 
         // 6. Save reconstructed audio to the same media folder as input
         let outputURL = audioURL.deletingLastPathComponent().appendingPathComponent("intention_snac_reconstructed.wav")
         let outputAudio = reconstructed.squeezed()  // Remove batch/channel dims
         try saveAudioArray(outputAudio, sampleRate: Double(snac.samplingRate), to: outputURL)
-        print("\u{001B}[32mSaved reconstructed audio to\u{001B}[0m: \(outputURL.path)")
 
         // Basic check: output should have samples
         #expect(reconstructed.shape.last! > 0)
@@ -87,8 +74,7 @@ struct MimiTests {
     @Test func testMimiEncodeDecodeCycle() async throws {
         // 1. Load audio from file
         let audioURL = Bundle.module.url(forResource: "intention", withExtension: "wav", subdirectory: "media")!
-        let (sampleRate, audioData) = try loadAudioArray(from: audioURL)
-        print("Loaded audio: \(audioData.shape), sample rate: \(sampleRate)")
+        let (_, audioData) = try loadAudioArray(from: audioURL)
 
         // 2. Load Mimi model from HuggingFace
         print("\u{001B}[33mLoading Mimi model...\u{001B}[0m")
@@ -99,24 +85,18 @@ struct MimiTests {
 
         // 3. Reshape audio for Mimi: [batch, channels, samples]
         let audioInput = audioData.reshaped([1, 1, audioData.shape[0]])
-        print("Audio input shape: \(audioInput.shape)")
 
         // 4. Encode audio to codes
-        print("\u{001B}[33mEncoding audio...\u{001B}[0m")
         let codes = mimi.encode(audioInput)
-        print("Encoded to codes shape: \(codes.shape)")
 
         // 5. Decode codes back to audio
-        print("\u{001B}[33mDecoding audio...\u{001B}[0m")
         let reconstructed = mimi.decode(codes)
         GPU.clearCache()
-        print("Reconstructed audio shape: \(reconstructed.shape)")
 
         // 6. Save reconstructed audio
         let outputURL = audioURL.deletingLastPathComponent().appendingPathComponent("intention_mimi_reconstructed.wav")
         let outputAudio = reconstructed.squeezed()  // Remove batch/channel dims
         try saveAudioArray(outputAudio, sampleRate: mimi.sampleRate, to: outputURL)
-        print("\u{001B}[32mSaved reconstructed audio to\u{001B}[0m: \(outputURL.path)")
 
         // Basic check: output should have samples
         #expect(reconstructed.shape.last! > 0)
@@ -151,7 +131,6 @@ struct VocosTests {
 
         // Output should have same shape as input (residual connection)
         #expect(output.shape == input.shape)
-        print("ConvNeXtBlock output shape: \(output.shape)")
     }
 
     @Test func testConvNeXtBlockWithAdaNorm() throws {
@@ -176,7 +155,6 @@ struct VocosTests {
 
         // Output should have same shape as input
         #expect(output.shape == input.shape)
-        print("ConvNeXtBlock with AdaNorm output shape: \(output.shape)")
     }
 
     @Test func testVocosBackbone() throws {
@@ -201,7 +179,6 @@ struct VocosTests {
         #expect(output.shape[0] == 1)
         #expect(output.shape[1] == 50)
         #expect(output.shape[2] == dim)
-        print("VocosBackbone output shape: \(output.shape)")
     }
 
     @Test func testVocosBackboneWithAdaNorm() throws {
@@ -230,7 +207,6 @@ struct VocosTests {
         #expect(output.shape[0] == 1)
         #expect(output.shape[1] == 50)
         #expect(output.shape[2] == dim)
-        print("VocosBackbone with AdaNorm output shape: \(output.shape)")
     }
 
     @Test func testISTFTHead() throws {
@@ -250,7 +226,6 @@ struct VocosTests {
         // Output should be audio waveform
         // Expected length: approximately (numFrames - 1) * hopLength after trimming
         #expect(output.ndim == 1 || output.ndim == 2)
-        print("ISTFTHead output shape: \(output.shape)")
     }
 
     @Test func testAdaLayerNorm() throws {
@@ -271,7 +246,6 @@ struct VocosTests {
 
         // Output should have same shape as input
         #expect(output.shape == input.shape)
-        print("AdaLayerNorm output shape: \(output.shape)")
     }
 
     @Test func testVocosModel() throws {
@@ -301,7 +275,6 @@ struct VocosTests {
         let output = vocos(input)
 
         // Output should be audio waveform
-        print("Vocos output shape: \(output.shape)")
         #expect(output.shape.count >= 1)
     }
 
@@ -335,8 +308,88 @@ struct VocosTests {
         let output = vocos.decode(input, bandwidthId: bandwidthId)
 
         // Output should be audio waveform
-        print("Vocos decode with bandwidthId output shape: \(output.shape)")
         #expect(output.shape.count >= 1)
+    }
+
+    // MARK: - vocosISTFTHeadMatchesPythonReference
+    //
+    // Sortie 19 — numeric-parity assertion for VocosISTFTHead.
+    //
+    // Fixture: Tests/media/parity/vocos_istft_head/
+    //   input.safetensors    — key "x"          shape [1, 8, 16]  (B, T, dim)
+    //   weights.safetensors  — keys "proj.weight" [34, 16], "proj.bias" [34], "window" [32]
+    //   expected.safetensors — key "audio"       shape [1, 56]    (B, samples)
+    //
+    // Config derived from fixture shapes:
+    //   dim=16, n_fft=32 (proj output = n_fft+2 = 34), hop_length=8.
+    //
+    // ISTFTHead uses a periodic Hann window (0.5 - 0.5*cos(2π*k/N)) matching
+    // torch.hann_window(periodic=True), and always preserves the batch dimension.
+
+    @Test func vocosISTFTHeadMatchesPythonReference() throws {
+        let fixture = try loadParityFixture("vocos_istft_head")
+
+        // --- Load input ---
+        guard let inputArr = fixture.input["x"] else {
+            Issue.record("vocos_istft_head input.safetensors missing key 'x'")
+            return
+        }
+        // inputArr shape: [1, 8, 16] — already in (B, T, dim) NLC format
+
+        // --- Load expected ---
+        guard let expectedAudio = fixture.expected["audio"] else {
+            Issue.record("vocos_istft_head expected.safetensors missing key 'audio'")
+            return
+        }
+        // expectedAudio shape: [1, 56] — (B, samples)
+
+        // --- Load weights ---
+        guard
+            let projWeight = fixture.weights["proj.weight"],
+            let projBias   = fixture.weights["proj.bias"]
+        else {
+            Issue.record("vocos_istft_head weights.safetensors missing 'proj.weight' or 'proj.bias'")
+            return
+        }
+        // projWeight: [34, 16] = [n_fft+2, dim], projBias: [34]
+        // Derive config from shapes:
+        let dim        = projWeight.shape[1]          // 16
+        let nFft       = projWeight.shape[0] - 2      // 32
+        let hopLength  = 8  // documented in fixture README (nFft/4)
+
+        // --- Construct ISTFTHead ---
+        let head = MLXAudioCodecs.ISTFTHead(dim: dim, nFft: nFft, hopLength: hopLength)
+
+        // --- Inject weights into head.out (Linear) via update(parameters:) ---
+        // Linear stores weight as [out, in], bias as [out].
+        // Python proj.weight [34, 16] = [out=34, in=16] matches MLX Linear layout.
+        let vocosParams: [String: MLXArray] = [
+            "out.weight": projWeight,
+            "out.bias":   projBias
+        ]
+        head.update(parameters: ModuleParameters.unflattened(vocosParams))
+        eval(head)
+
+        // --- Forward pass ---
+        // ISTFTHead expects NLC input [B, T, dim].
+        let swiftAudio = head(inputArr)
+        eval(swiftAudio)
+
+        // --- Shape assertion ---
+        #expect(
+            swiftAudio.shape == expectedAudio.shape,
+            "ISTFTHead audio shape mismatch: swift=\(swiftAudio.shape) expected=\(expectedAudio.shape)"
+        )
+
+        // --- Numeric-parity assertion ---
+        let close = MLX.allClose(swiftAudio, expectedAudio, rtol: 1e-4, atol: 1e-4)
+        let isClose = close.item(Bool.self)
+
+        if !isClose {
+            let maxAbsErr = abs(swiftAudio - expectedAudio).max().item(Float.self)
+            Issue.record("ISTFTHead audio != Python reference. max_abs_err=\(maxAbsErr) (atol=1e-4, rtol=1e-4)")
+        }
+        #expect(isClose, "vocosISTFTHeadMatchesPythonReference: allClose failed (atol=1e-4, rtol=1e-4)")
     }
 }
 
@@ -363,8 +416,6 @@ struct EncodecTests {
         #expect(config.numLstmLayers == 2)
         #expect(config.samplingRate == 24000)
         #expect(config.upsamplingRatios == [8, 5, 4, 2])
-
-        print("EncodecConfig default values verified")
     }
 
     @Test func testEncodecConv1d() throws {
@@ -383,7 +434,6 @@ struct EncodecTests {
 
         #expect(output.shape[0] == 1)
         #expect(output.shape[2] == 64)
-        print("EncodecConv1d output shape: \(output.shape)")
     }
 
     @Test func testEncodecLSTM() throws {
@@ -397,7 +447,6 @@ struct EncodecTests {
         #expect(output.shape[0] == 1)
         #expect(output.shape[1] == 50)
         #expect(output.shape[2] == 64)
-        print("EncodecLSTM output shape: \(output.shape)")
     }
 
     @Test func testEncodecResnetBlock() throws {
@@ -415,7 +464,6 @@ struct EncodecTests {
 
         // Output should have same shape (residual connection)
         #expect(output.shape == input.shape)
-        print("EncodecResnetBlock output shape: \(output.shape)")
     }
 
     @Test func testEncodecEuclideanCodebook() throws {
@@ -429,14 +477,12 @@ struct EncodecTests {
 
         #expect(indices.shape[0] == 1)
         #expect(indices.shape[1] == 50)
-        print("EncodecEuclideanCodebook indices shape: \(indices.shape)")
 
         // Decode back
         let decoded = codebook.decode(indices)
         #expect(decoded.shape[0] == 1)
         #expect(decoded.shape[1] == 50)
         #expect(decoded.shape[2] == config.codebookDim)
-        print("EncodecEuclideanCodebook decoded shape: \(decoded.shape)")
     }
 
     @Test func testEncodecRVQ() throws {
@@ -450,13 +496,11 @@ struct EncodecTests {
 
         // Codes shape should be (batch, num_quantizers, length)
         #expect(codes.shape[0] == 1)
-        print("EncodecRVQ codes shape: \(codes.shape)")
 
         // Decode
         let decoded = rvq.decode(codes)
         #expect(decoded.shape[0] == 1)
         #expect(decoded.shape[1] == 50)
-        print("EncodecRVQ decoded shape: \(decoded.shape)")
     }
 
     @Test func testEncodecModel() throws {
@@ -469,14 +513,113 @@ struct EncodecTests {
 
         // Encode
         let (codes, scales) = model.encode(audio, bandwidth: 1.5)
-        print("Encodec codes shape: \(codes.shape)")
         #expect(codes.shape[0] >= 1)
 
         // Decode
         let decoded = model.decode(codes, scales)
-        print("Encodec decoded shape: \(decoded.shape)")
         #expect(decoded.shape[0] == 1)
         #expect(decoded.shape[2] == 1)
+    }
+
+    // MARK: - encodecQuantizerMatchesPythonReference
+    //
+    // Sortie 19 — numeric-parity assertion for Encodec residual VQ.
+    //
+    // Fixture: Tests/media/parity/encodec_quantizer/
+    //   input.safetensors    — key "x"         shape [1, 8, 12]  (B, dim, T) — Python NCL
+    //   weights.safetensors  — keys "layers.0.codebook" [16, 8], "layers.1.codebook" [16, 8]
+    //   expected.safetensors — key "quantized"  shape [1, 8, 12]  (B, dim, T) — Python NCL
+    //                          key "indices"    shape [1, 2, 12]  (B, nq, T) — Python layout
+    //
+    // Layout note: Python uses NCL [B, dim, T]; Swift uses NLC [B, T, dim].
+    //   - Transpose fixture input [1,8,12] → [1,12,8] before Swift encode.
+    //   - Transpose Swift quantized output [1,12,8] → [1,8,12] before comparison.
+    //
+    // Config: codebookSize=16, codebookDim=8, 2 quantizer layers.
+    // To produce exactly 2 quantizer layers via EncodecResidualVectorQuantizer.init:
+    //   samplingRate=1000, upsamplingRatios=[10] → hopLength=10, frameRate=100
+    //   targetBandwidths=[2.0] → numQuantizers = Int(1000*2/(100*10)) = 2.
+
+    @Test func encodecQuantizerMatchesPythonReference() throws {
+        let fixture = try loadParityFixture("encodec_quantizer")
+
+        // --- Load input (Python NCL [B, dim, T]) ---
+        guard let inputNCL = fixture.input["x"] else {
+            Issue.record("encodec_quantizer input.safetensors missing key 'x'")
+            return
+        }
+        // Transpose NCL → NLC for Swift: [1, 8, 12] → [1, 12, 8]
+        let inputNLC = inputNCL.swappedAxes(1, 2)
+
+        // --- Load expected ---
+        guard let expectedQuantizedNCL = fixture.expected["quantized"] else {
+            Issue.record("encodec_quantizer expected.safetensors missing key 'quantized'")
+            return
+        }
+        // expectedQuantizedNCL: [1, 8, 12] in Python NCL
+
+        // --- Load weights ---
+        guard
+            let cb0 = fixture.weights["layers.0.codebook"],
+            let cb1 = fixture.weights["layers.1.codebook"]
+        else {
+            Issue.record("encodec_quantizer weights.safetensors missing 'layers.0.codebook' or 'layers.1.codebook'")
+            return
+        }
+        // cb0, cb1 each [codebook_size=16, codebook_dim=8]
+        let codebookSize = cb0.shape[0]
+        let codebookDim  = cb0.shape[1]
+
+        // --- Construct EncodecResidualVectorQuantizer with exactly 2 layers ---
+        // samplingRate=1000, upsamplingRatios=[10] → hopLength=10, frameRate=100
+        // targetBandwidths=[2.0] → numQuantizers = Int(1000*2/(100*10)) = 2
+        let config = EncodecConfig(
+            codebookSize: codebookSize,
+            codebookDim: codebookDim,
+            upsamplingRatios: [10],
+            targetBandwidths: [2.0],
+            samplingRate: 1000
+        )
+        let rvq = EncodecResidualVectorQuantizer(config: config)
+        #expect(rvq.layers.count == 2, "Expected 2 quantizer layers, got \(rvq.layers.count)")
+
+        // --- Inject codebook weights ---
+        // EncodecEuclideanCodebook stores embed [codebook_size, codebook_dim].
+        // Inject via update(parameters:) using flat dot-path keys.
+        let encodecParams: [String: MLXArray] = [
+            "layers.0.codebook.embed": cb0,
+            "layers.1.codebook.embed": cb1
+        ]
+        rvq.update(parameters: ModuleParameters.unflattened(encodecParams))
+        eval(rvq)
+
+        // --- Forward pass ---
+        // Swift encode expects NLC [B, L, codebook_dim].
+        // Returns codes [B, nq, L] = [1, 2, 12].
+        let codes = rvq.encode(inputNLC)
+
+        // Swift decode returns NLC [B, L, codebook_dim] = [1, 12, 8].
+        let swiftQuantizedNLC = rvq.decode(codes)
+        eval(swiftQuantizedNLC)
+
+        // --- Transpose Swift output NLC → NCL for comparison ---
+        let swiftQuantizedNCL = swiftQuantizedNLC.swappedAxes(1, 2)  // [1, 8, 12]
+
+        // --- Shape assertion ---
+        #expect(
+            swiftQuantizedNCL.shape == expectedQuantizedNCL.shape,
+            "Encodec quantized shape mismatch: swift=\(swiftQuantizedNCL.shape) expected=\(expectedQuantizedNCL.shape)"
+        )
+
+        // --- Numeric-parity assertion ---
+        let close = MLX.allClose(swiftQuantizedNCL, expectedQuantizedNCL, rtol: 1e-4, atol: 1e-4)
+        let isClose = close.item(Bool.self)
+
+        if !isClose {
+            let maxAbsErr = abs(swiftQuantizedNCL - expectedQuantizedNCL).max().item(Float.self)
+            Issue.record("Encodec quantized != Python reference. max_abs_err=\(maxAbsErr) (atol=1e-4, rtol=1e-4)")
+        }
+        #expect(isClose, "encodecQuantizerMatchesPythonReference: allClose failed (atol=1e-4, rtol=1e-4)")
     }
 }
 
@@ -503,8 +646,6 @@ struct DACVAETests {
         #expect(config.codebookDim == 128)
         #expect(config.sampleRate == 48000)
         #expect(config.hopLength == 1920)  // 2 * 8 * 10 * 12
-
-        print("DACVAEConfig default values verified")
     }
 
     @Test func testDACVAESnake1d() throws {
@@ -518,7 +659,6 @@ struct DACVAETests {
 
         // Output should have same shape
         #expect(output.shape == input.shape)
-        print("DACVAESnake1d output shape: \(output.shape)")
     }
 
     @Test func testDACVAEWNConv1d() throws {
@@ -536,7 +676,6 @@ struct DACVAETests {
 
         #expect(output.shape[0] == 1)
         #expect(output.shape[2] == 64)
-        print("DACVAEWNConv1d output shape: \(output.shape)")
     }
 
     @Test func testDACVAEResidualUnit() throws {
@@ -551,7 +690,6 @@ struct DACVAETests {
         // Output should have similar shape (may differ slightly due to padding)
         #expect(output.shape[0] == 1)
         #expect(output.shape[2] == dim)
-        print("DACVAEResidualUnit output shape: \(output.shape)")
     }
 
     @Test func testDACVAEEncoderBlock() throws {
@@ -565,7 +703,6 @@ struct DACVAETests {
 
         #expect(output.shape[0] == 1)
         #expect(output.shape[2] == dim)
-        print("DACVAEEncoderBlock output shape: \(output.shape)")
     }
 
     @Test func testDACVAEEncoder() throws {
@@ -582,7 +719,6 @@ struct DACVAETests {
 
         #expect(output.shape[0] == 1)
         #expect(output.shape[2] == 128)
-        print("DACVAEEncoder output shape: \(output.shape)")
     }
 
     @Test func testDACVAEQuantizerProj() throws {
@@ -597,7 +733,6 @@ struct DACVAETests {
         // Should project to 2*outDim (mean + logvar)
         #expect(projected.shape[0] == 1)
         #expect(projected.shape[2] == 128)  // 64 * 2
-        print("DACVAEQuantizerInProj output shape: \(projected.shape)")
 
         // Take mean (first half)
         let mean = MLXRandom.normal([1, 50, 64])
@@ -605,7 +740,6 @@ struct DACVAETests {
 
         #expect(unprojected.shape[0] == 1)
         #expect(unprojected.shape[2] == 128)
-        print("DACVAEQuantizerOutProj output shape: \(unprojected.shape)")
     }
 
     @Test func testDACVAEModel() throws {
@@ -625,13 +759,11 @@ struct DACVAETests {
 
         // Encode to codebook space
         let encoded = model(audio)
-        print("DACVAE encoded shape: \(encoded.shape)")
         #expect(encoded.shape[0] == 1)
         #expect(encoded.shape[1] == config.codebookDim)
 
         // Decode back to audio
         let decoded = model.decode(encoded)
-        print("DACVAE decoded shape: \(decoded.shape)")
         #expect(decoded.shape[0] == 1)
         #expect(decoded.shape[2] == 1)
     }
@@ -643,8 +775,184 @@ struct DACVAETests {
 
         let config2 = DACVAEConfig(encoderRates: [2, 8, 10, 12])
         #expect(config2.hopLength == 1920)  // 2 * 8 * 10 * 12
+    }
 
-        print("DACVAEConfig hopLength verified")
+    // MARK: - dacvaeEncoderBlockMatchesPythonReference
+    //
+    // Sortie 19 — numeric-parity assertion for DACVAEEncoderBlock.
+    //
+    // Fixture: Tests/media/parity/dacvae_encoder_block/
+    //   input.safetensors    — key "x"   shape [1, 8, 32]  (B, C, T) — Python NCL
+    //   weights.safetensors  — keys:
+    //       snake.alpha [1,8,1], down.weight [16,8,4], down.bias [16]
+    //       r1.s1.alpha [1,8,1], r1.c1.weight [8,8,7], r1.c1.bias [8]
+    //       r1.s2.alpha [1,8,1], r1.c2.weight [8,8,1], r1.c2.bias [8]
+    //       r2.s1.alpha [1,8,1], r2.c1.weight [8,8,7], r2.c1.bias [8]
+    //       r2.s2.alpha [1,8,1], r2.c2.weight [8,8,1], r2.c2.bias [8]
+    //       r3.s1.alpha [1,8,1], r3.c1.weight [8,8,7], r3.c1.bias [8]
+    //       r3.s2.alpha [1,8,1], r3.c2.weight [8,8,1], r3.c2.bias [8]
+    //   expected.safetensors — key "y"   shape [1, 16, 16] (B, C, T) — Python NCL
+    //
+    // Layout note: Python uses NCL [B, C, T]; Swift uses NLC [B, T, C].
+    //   - Transpose fixture input [1,8,32] → [1,32,8] before Swift forward.
+    //   - Transpose Swift output [1,16,16] → [1,16,16] (same shape) before comparison.
+    //     (Axes 1 and 2 are both 16, so shape is invariant but values differ.)
+    //
+    // Weight injection note:
+    //   Python uses plain nn.Conv1d; weight shape is [out, in, k].
+    //   Swift uses DACVAEWNConv1d; weight_v/weight_g shape is [out, k, in].
+    //   → Transpose Python weight axes (1, 2) before injecting as weight_v.
+    //   → Compute weight_g = per-output-channel L2 norm (sqrt(sum(w^2, axes=[1,2])))
+    //
+    //   Python snake alpha shape [1, C, 1] (NCL) → Swift needs [1, 1, C] (NLC).
+    //   → Transpose alpha axes (1, 2) or reshape.
+    //
+    // Key remapping (Python fixture key → Swift module path):
+    //   "r1.s1.alpha"   → "res1.act1.alpha"
+    //   "r1.c1.weight"  → "res1.conv1.weight_v" (transposed), "res1.conv1.weight_g"
+    //   "r1.c1.bias"    → "res1.conv1.bias"
+    //   "r1.s2.alpha"   → "res1.act2.alpha"
+    //   "r1.c2.weight"  → "res1.conv2.weight_v" (transposed), "res1.conv2.weight_g"
+    //   "r1.c2.bias"    → "res1.conv2.bias"
+    //   (same pattern for r2→res2, r3→res3)
+    //   "snake.alpha"   → "snake.alpha"
+    //   "down.weight"   → "conv.weight_v" (transposed), "conv.weight_g"
+    //   "down.bias"     → "conv.bias"
+
+    @Test func dacvaeEncoderBlockMatchesPythonReference() throws {
+        let fixture = try loadParityFixture("dacvae_encoder_block")
+
+        // --- Load input (Python NCL [B, C, T] = [1, 8, 32]) ---
+        guard let inputNCL = fixture.input["x"] else {
+            Issue.record("dacvae_encoder_block input.safetensors missing key 'x'")
+            return
+        }
+        // Transpose NCL → NLC: [1, 8, 32] → [1, 32, 8]
+        let inputNLC = inputNCL.swappedAxes(1, 2)
+
+        // --- Load expected output (Python NCL [B, C, T] = [1, 16, 16]) ---
+        guard let expectedNCL = fixture.expected["y"] else {
+            Issue.record("dacvae_encoder_block expected.safetensors missing key 'y'")
+            return
+        }
+
+        // --- Helper: compute weight_g from a plain weight [out, k, in] ---
+        // weight_g = per-output-channel L2 norm = sqrt(sum(w^2, axes=[1,2], keepDims=true))
+        func wg(_ w: MLXArray) -> MLXArray {
+            MLX.sqrt(MLX.sum(w * w, axes: [1, 2], keepDims: true))
+        }
+
+        // --- Helper: transpose Python weight [out, in, k] → Swift [out, k, in] ---
+        func wv(_ w: MLXArray) -> MLXArray {
+            w.swappedAxes(1, 2)
+        }
+
+        // --- Helper: transpose snake alpha [1, C, 1] → [1, 1, C] ---
+        func alphaT(_ a: MLXArray) -> MLXArray {
+            a.swappedAxes(1, 2)
+        }
+
+        // --- Load and prepare all weights ---
+        // Residual 1
+        guard
+            let r1s1a = fixture.weights["r1.s1.alpha"],
+            let r1c1w = fixture.weights["r1.c1.weight"],
+            let r1c1b = fixture.weights["r1.c1.bias"],
+            let r1s2a = fixture.weights["r1.s2.alpha"],
+            let r1c2w = fixture.weights["r1.c2.weight"],
+            let r1c2b = fixture.weights["r1.c2.bias"],
+            // Residual 2
+            let r2s1a = fixture.weights["r2.s1.alpha"],
+            let r2c1w = fixture.weights["r2.c1.weight"],
+            let r2c1b = fixture.weights["r2.c1.bias"],
+            let r2s2a = fixture.weights["r2.s2.alpha"],
+            let r2c2w = fixture.weights["r2.c2.weight"],
+            let r2c2b = fixture.weights["r2.c2.bias"],
+            // Residual 3
+            let r3s1a = fixture.weights["r3.s1.alpha"],
+            let r3c1w = fixture.weights["r3.c1.weight"],
+            let r3c1b = fixture.weights["r3.c1.bias"],
+            let r3s2a = fixture.weights["r3.s2.alpha"],
+            let r3c2w = fixture.weights["r3.c2.weight"],
+            let r3c2b = fixture.weights["r3.c2.bias"],
+            // Final snake + downsampling conv
+            let snakeA = fixture.weights["snake.alpha"],
+            let downW  = fixture.weights["down.weight"],
+            let downB  = fixture.weights["down.bias"]
+        else {
+            Issue.record("dacvae_encoder_block weights.safetensors missing one or more expected keys")
+            return
+        }
+
+        // Config: input has C=8, output has C=16, stride=2.
+        // DACVAEEncoderBlock(dim: 16, stride: 2) creates residuals with dim/2=8.
+        let block = DACVAEEncoderBlock(dim: 16, stride: 2)
+
+        // Inject weights via update(parameters:) using flat dot-paths.
+        // weight_v = Python weight transposed [out, in, k] → [out, k, in]
+        // weight_g = per-output-channel norm of weight_v
+        let r1c1wv = wv(r1c1w); let r1c2wv = wv(r1c2w)
+        let r2c1wv = wv(r2c1w); let r2c2wv = wv(r2c2w)
+        let r3c1wv = wv(r3c1w); let r3c2wv = wv(r3c2w)
+        let downWv = wv(downW)
+
+        let dacvaeParams: [String: MLXArray] = [
+            "res1.act1.alpha":    alphaT(r1s1a),
+            "res1.act2.alpha":    alphaT(r1s2a),
+            "res1.conv1.weight_v": r1c1wv,
+            "res1.conv1.weight_g": wg(r1c1wv),
+            "res1.conv1.bias":    r1c1b,
+            "res1.conv2.weight_v": r1c2wv,
+            "res1.conv2.weight_g": wg(r1c2wv),
+            "res1.conv2.bias":    r1c2b,
+            "res2.act1.alpha":    alphaT(r2s1a),
+            "res2.act2.alpha":    alphaT(r2s2a),
+            "res2.conv1.weight_v": r2c1wv,
+            "res2.conv1.weight_g": wg(r2c1wv),
+            "res2.conv1.bias":    r2c1b,
+            "res2.conv2.weight_v": r2c2wv,
+            "res2.conv2.weight_g": wg(r2c2wv),
+            "res2.conv2.bias":    r2c2b,
+            "res3.act1.alpha":    alphaT(r3s1a),
+            "res3.act2.alpha":    alphaT(r3s2a),
+            "res3.conv1.weight_v": r3c1wv,
+            "res3.conv1.weight_g": wg(r3c1wv),
+            "res3.conv1.bias":    r3c1b,
+            "res3.conv2.weight_v": r3c2wv,
+            "res3.conv2.weight_g": wg(r3c2wv),
+            "res3.conv2.bias":    r3c2b,
+            "snake.alpha":        alphaT(snakeA),
+            "conv.weight_v":      downWv,
+            "conv.weight_g":      wg(downWv),
+            "conv.bias":          downB,
+        ]
+        block.update(parameters: ModuleParameters.unflattened(dacvaeParams))
+        eval(block)
+
+        // --- Forward pass ---
+        // Swift DACVAEEncoderBlock expects NLC [B, T, C].
+        let swiftOutputNLC = block(inputNLC)
+        eval(swiftOutputNLC)
+
+        // --- Transpose Swift output NLC → NCL for comparison ---
+        // swiftOutputNLC: [1, 16, 16] (B, T, C) → NCL: [1, 16, 16] (B, C, T)
+        let swiftOutputNCL = swiftOutputNLC.swappedAxes(1, 2)
+
+        // --- Shape assertion ---
+        #expect(
+            swiftOutputNCL.shape == expectedNCL.shape,
+            "DACVAEEncoderBlock output shape mismatch: swift=\(swiftOutputNCL.shape) expected=\(expectedNCL.shape)"
+        )
+
+        // --- Numeric-parity assertion ---
+        let close = MLX.allClose(swiftOutputNCL, expectedNCL, rtol: 1e-4, atol: 1e-4)
+        let isClose = close.item(Bool.self)
+
+        if !isClose {
+            let maxAbsErr = abs(swiftOutputNCL - expectedNCL).max().item(Float.self)
+            Issue.record("DACVAEEncoderBlock output != Python reference. max_abs_err=\(maxAbsErr) (atol=1e-4, rtol=1e-4)")
+        }
+        #expect(isClose, "dacvaeEncoderBlockMatchesPythonReference: allClose failed (atol=1e-4, rtol=1e-4)")
     }
 }
 

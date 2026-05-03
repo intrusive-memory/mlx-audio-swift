@@ -1,0 +1,6 @@
+{
+    "dim": 512,
+    "n_bins": 32064,
+    "tokenizer": "sentencepiece",
+    "tokenizer_path": "tokenizer.model"
+}

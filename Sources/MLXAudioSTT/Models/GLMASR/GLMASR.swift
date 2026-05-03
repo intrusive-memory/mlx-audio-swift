@@ -272,12 +272,12 @@ private struct GenerationContext {
 
     /// Decode token to text.
     func decode(_ token: Int) -> String {
-        tokenizer.decode(tokens: [token])
+        tokenizer.decode(tokenIds: [token])
     }
 
     /// Decode tokens to text.
     func decode(_ tokens: [Int]) -> String {
-        tokenizer.decode(tokens: tokens)
+        tokenizer.decode(tokenIds: tokens)
     }
 }
 
@@ -631,7 +631,7 @@ public class GLMASRModel: Module {
 
         // Phase 2 — load tokenizer async outside managed-access scope.
         // Tokenizer files are read-only on disk post-verification; this is safe.
-        model.tokenizer = try await AutoTokenizer.from(modelFolder: modelDir)
+        model.tokenizer = try await AutoTokenizer.from(directory: modelDir)
 
         return model
     }

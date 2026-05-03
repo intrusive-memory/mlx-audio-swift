@@ -41,6 +41,7 @@ xcodebuild test -scheme MLXAudio-Package -destination 'platform=macOS' \
   -only-testing:MLXAudioTests/Qwen3TTSPrepareICLInputsTests \
   -only-testing:MLXAudioTests/Qwen3TTSGenerateICLTests \
   -only-testing:MLXAudioTests/Qwen3TTSSpeakerEncoderSmokeTests \
+  -only-testing:MLXAudioTests/LlamaTTSModuleSetupTests \
   CODE_SIGNING_ALLOWED=NO
 ```
 
@@ -491,6 +492,23 @@ Tests use **Swift Testing** framework (`@Test`, `#expect`, `@Suite`), not XCTest
 | `Qwen3TTSPrepareICLInputsTests` | MLXAudioTTSTests.swift | — | ICL input preparation, ref code handling, embedding composition |
 | `Qwen3TTSGenerateICLTests` | MLXAudioTTSTests.swift | — | ICL generation validation (missing encoder, tokenizer, ref audio/text) |
 | `Qwen3TTSSpeakerEncoderSmokeTests` | MLXAudioTTSTests.swift | — | Smoke tests for speaker encoder integration with Base model |
+
+### Network-gated integration tests — MLXAUDIO_NETWORK_TESTS=1
+
+`AudioModelManagerIntegrationTests` (6 tests) downloads models via
+`Acervo.ensureComponentReady()`. These tests are **skipped by default** unless
+`MLXAUDIO_NETWORK_TESTS=1` is set in the environment:
+
+```bash
+MLXAUDIO_NETWORK_TESTS=1 xcodebuild test \
+  -scheme MLXAudio-Package -destination 'platform=macOS' \
+  -only-testing:MLXAudioTests/AudioModelManagerIntegrationTests \
+  CODE_SIGNING_ALLOWED=NO
+```
+
+When the env var is set: download exceptions propagate (hard failure), and
+`Acervo.isComponentReady()` is asserted true after each download. Without the
+env var (e.g., `make test` in CI), all 6 tests report **skipped** — not passed.
 
 ### Test suites that require model downloads (local only)
 

@@ -33,6 +33,9 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Check local-only suite list completeness
+        run: bash bin/check-local-only-suites.sh
+
       - name: Check for new TODOs/FIXMEs
         run: |
           echo "Checking for TODO/FIXME in Sources/..."
@@ -80,53 +83,12 @@ jobs:
 
       - name: Build
         run: |
-          xcodebuild build-for-testing \
-            -scheme MLXAudio-Package \
-            -destination 'platform=macOS,arch=arm64' \
-            CODE_SIGNING_ALLOWED=NO \
-            2>&1 | tee build-output.log
+          make build-for-testing 2>&1 | tee build-output.log
 
-      - name: Test Codecs (unit tests)
+      - name: Test (CI-safe suites)
+        # Single source of truth for the suite list lives in Makefile's CI_TESTS.
         run: |
-          xcodebuild test-without-building \
-            -scheme MLXAudio-Package \
-            -destination 'platform=macOS,arch=arm64' \
-            -only-testing:MLXAudioTests/VocosTests \
-            -only-testing:MLXAudioTests/EncodecTests \
-            -only-testing:MLXAudioTests/DACVAETests \
-            CODE_SIGNING_ALLOWED=NO \
-            2>&1 | tee test-codecs-output.log
-
-      - name: Test STT (unit tests)
-        run: |
-          xcodebuild test-without-building \
-            -scheme MLXAudio-Package \
-            -destination 'platform=macOS,arch=arm64' \
-            -only-testing:MLXAudioTests/GLMASRModuleSetupTests \
-            -only-testing:MLXAudioTests/Qwen3ASRModuleSetupTests \
-            -only-testing:MLXAudioTests/ForceAlignProcessorTests \
-            -only-testing:MLXAudioTests/ForcedAlignResultTests \
-            -only-testing:MLXAudioTests/Qwen3ASRHelperTests \
-            -only-testing:MLXAudioTests/SplitAudioIntoChunksTests \
-            CODE_SIGNING_ALLOWED=NO \
-            2>&1 | tee test-stt-output.log
-
-      - name: Test Qwen3-TTS (unit tests)
-        run: |
-          xcodebuild test-without-building \
-            -scheme MLXAudio-Package \
-            -destination 'platform=macOS,arch=arm64' \
-            -only-testing:MLXAudioTests/Qwen3TTSSpeechTokenizerTests \
-            -only-testing:MLXAudioTests/Qwen3TTSSpeechTokenizerEncodeTests \
-            -only-testing:MLXAudioTests/Qwen3TTSLanguageTests \
-            -only-testing:MLXAudioTests/Qwen3TTSConfigTests \
-            -only-testing:MLXAudioTests/Qwen3TTSRoutingTests \
-            -only-testing:MLXAudioTests/Qwen3TTSPrepareBaseInputsTests \
-            -only-testing:MLXAudioTests/Qwen3TTSSpeakerEncoderTests \
-            -only-testing:MLXAudioTests/Qwen3TTSSpeakerEncoderWeightTests \
-            -only-testing:MLXAudioTests/Qwen3TTSSpeakerEmbeddingTests \
-            CODE_SIGNING_ALLOWED=NO \
-            2>&1 | tee test-qwen3tts-output.log
+          make test-without-building 2>&1 | tee test-output.log
 
       - name: Upload test output
         if: always()
@@ -135,9 +97,7 @@ jobs:
           name: test-output
           path: |
             build-output.log
-            test-codecs-output.log
-            test-stt-output.log
-            test-qwen3tts-output.log
+            test-output.log
           retention-days: 7
 
   download-models:

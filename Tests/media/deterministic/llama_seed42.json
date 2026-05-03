@@ -1,0 +1,12 @@
+{
+  "_comment": "PLACEHOLDER. Regenerate by running DeterministicGenerationTests/llamaTTSDeterministic locally with mlx-models-v2 cache. Test will assert real tokens once filled in.",
+  "_regenerate": "xcodebuild test -scheme MLXAudio-Package -destination 'platform=macOS' -only-testing:MLXAudioTests/DeterministicGenerationTests CODE_SIGNING_ALLOWED=NO",
+  "_model": "mlx-community/orpheus-3b-0.1-ft-bf16",
+  "_prompt": "Hello, this is a deterministic seed test.",
+  "_voice": "tara",
+  "_seed": 42,
+  "_temperature": 0.6,
+  "_top_p": 0.8,
+  "_max_tokens": 64,
+  "expected_token_ids": []
+}

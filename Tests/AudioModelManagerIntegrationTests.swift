@@ -178,8 +178,18 @@ struct AudioModelManagerIntegrationTests {
   }
 
   // MARK: - SNAC Download and File Verification Tests
+  // These tests require MLXAUDIO_NETWORK_TESTS=1 to run.
+  // Without the env var they are skipped (not passed) to prevent silent
+  // false-greens in CI where network access is unavailable.
+  // Set MLXAUDIO_NETWORK_TESTS=1 in your environment to enable them locally.
 
-  @Test("SNAC Model Can Be Downloaded via Acervo")
+  @Test(
+    "SNAC Model Can Be Downloaded via Acervo",
+    .enabled(
+      if: ProcessInfo.processInfo.environment["MLXAUDIO_NETWORK_TESTS"] == "1",
+      "requires MLXAUDIO_NETWORK_TESTS=1"
+    )
+  )
   func testSNACModelDownload() async throws {
     print("\n=== SNAC Model Download Test ===")
 
@@ -189,82 +199,99 @@ struct AudioModelManagerIntegrationTests {
     print("Downloading SNAC component: \(componentId)")
     print("  Repo: \(AudioModelRepo.snac24kHz.rawValue)")
 
-    // Attempt to download - this may fail in sandbox, but we document the path
-    do {
-      try await Acervo.ensureComponentReady(componentId) { progress in
-        print("  [\(progress.fileIndex + 1)/\(progress.totalFiles)] \(progress.fileName)")
-      }
-      print("✓ SNAC download completed")
-    } catch {
-      print("Note: Download failed (expected in sandbox): \(error)")
-      print("Component descriptor was properly registered and ready for download")
+    try await Acervo.ensureComponentReady(componentId) { progress in
+      print("  [\(progress.fileIndex + 1)/\(progress.totalFiles)] \(progress.fileName)")
     }
+    print("✓ SNAC download completed")
+
+    #expect(Acervo.isComponentReady(componentId), "SNAC component should be ready after download")
   }
 
-  @Test("SNAC Model Files Exist After Download")
+  @Test(
+    "SNAC Model Files Exist After Download",
+    .enabled(
+      if: ProcessInfo.processInfo.environment["MLXAUDIO_NETWORK_TESTS"] == "1",
+      "requires MLXAUDIO_NETWORK_TESTS=1"
+    )
+  )
   func testSNACModelFilesExist() async throws {
     print("\n=== SNAC Model File Verification Test ===")
 
     AudioModelManager.ensureComponentsRegistered()
 
-    do {
-      try await Acervo.ensureComponentReady(AudioModelRepo.snac24kHz.componentId)
+    try await Acervo.ensureComponentReady(AudioModelRepo.snac24kHz.componentId)
 
-      guard let modelDir = AudioModelManager.modelDirectory(for: .snac24kHz) else {
-        throw TestError.modelDirectoryNotFound(AudioModelRepo.snac24kHz.rawValue)
-      }
+    #expect(
+      Acervo.isComponentReady(AudioModelRepo.snac24kHz.componentId),
+      "SNAC component should be ready after ensureComponentReady"
+    )
 
-      print("SNAC model directory: \(modelDir.path)")
-
-      // Verify required files exist
-      let requiredFiles = ["config.json", "model.safetensors"]
-      for fileName in requiredFiles {
-        let filePath = modelDir.appendingPathComponent(fileName)
-        let exists = FileManager.default.fileExists(atPath: filePath.path)
-        print("  \(fileName): \(exists ? "✓" : "✗")")
-        #expect(exists, "\(fileName) should exist in SNAC model directory")
-      }
-
-      print("✓ All SNAC required files present")
-    } catch {
-      print("Note: File verification skipped (download may have failed): \(error)")
+    guard let modelDir = AudioModelManager.modelDirectory(for: .snac24kHz) else {
+      throw TestError.modelDirectoryNotFound(AudioModelRepo.snac24kHz.rawValue)
     }
+
+    print("SNAC model directory: \(modelDir.path)")
+
+    // Verify required files exist
+    let requiredFiles = ["config.json", "model.safetensors"]
+    for fileName in requiredFiles {
+      let filePath = modelDir.appendingPathComponent(fileName)
+      let exists = FileManager.default.fileExists(atPath: filePath.path)
+      print("  \(fileName): \(exists ? "✓" : "✗")")
+      #expect(exists, "\(fileName) should exist in SNAC model directory")
+    }
+
+    print("✓ All SNAC required files present")
   }
 
-  @Test("SNAC Model SHA-256 Can Be Computed")
+  @Test(
+    "SNAC Model SHA-256 Can Be Computed",
+    .enabled(
+      if: ProcessInfo.processInfo.environment["MLXAUDIO_NETWORK_TESTS"] == "1",
+      "requires MLXAUDIO_NETWORK_TESTS=1"
+    )
+  )
   func testSNACModelChecksum() async throws {
     print("\n=== SNAC Model SHA-256 Verification Test ===")
 
     AudioModelManager.ensureComponentsRegistered()
 
-    do {
-      try await Acervo.ensureComponentReady(AudioModelRepo.snac24kHz.componentId)
+    try await Acervo.ensureComponentReady(AudioModelRepo.snac24kHz.componentId)
 
-      guard let modelDir = AudioModelManager.modelDirectory(for: .snac24kHz) else {
-        throw TestError.modelDirectoryNotFound(AudioModelRepo.snac24kHz.rawValue)
-      }
+    #expect(
+      Acervo.isComponentReady(AudioModelRepo.snac24kHz.componentId),
+      "SNAC component should be ready after ensureComponentReady"
+    )
 
-      let filesToVerify = ["config.json", "model.safetensors"]
-
-      print("Computing SHA-256 checksums for SNAC model files:")
-      for fileName in filesToVerify {
-        let filePath = modelDir.appendingPathComponent(fileName)
-        if FileManager.default.fileExists(atPath: filePath.path) {
-          let checksum = try computeFileSHA256(filePath.path)
-          print("  \(fileName):")
-          print("    SHA-256: \(checksum)")
-        }
-      }
-
-      print("✓ SHA-256 checksums computed successfully")
-    } catch {
-      print("Note: Checksum verification skipped (download may have failed): \(error)")
+    guard let modelDir = AudioModelManager.modelDirectory(for: .snac24kHz) else {
+      throw TestError.modelDirectoryNotFound(AudioModelRepo.snac24kHz.rawValue)
     }
+
+    let filesToVerify = ["config.json", "model.safetensors"]
+
+    print("Computing SHA-256 checksums for SNAC model files:")
+    for fileName in filesToVerify {
+      let filePath = modelDir.appendingPathComponent(fileName)
+      let checksum = try computeFileSHA256(filePath.path)
+      print("  \(fileName):")
+      print("    SHA-256: \(checksum)")
+    }
+
+    print("✓ SHA-256 checksums computed successfully")
   }
 
   // MARK: - Mimi Download and File Verification Tests
+  // These tests require MLXAUDIO_NETWORK_TESTS=1 to run.
+  // Without the env var they are skipped (not passed) to prevent silent
+  // false-greens in CI where network access is unavailable.
 
-  @Test("Mimi Model Can Be Downloaded via Acervo")
+  @Test(
+    "Mimi Model Can Be Downloaded via Acervo",
+    .enabled(
+      if: ProcessInfo.processInfo.environment["MLXAUDIO_NETWORK_TESTS"] == "1",
+      "requires MLXAUDIO_NETWORK_TESTS=1"
+    )
+  )
   func testMimiModelDownload() async throws {
     print("\n=== Mimi Model Download Test ===")
 
@@ -274,75 +301,83 @@ struct AudioModelManagerIntegrationTests {
     print("Downloading Mimi component: \(componentId)")
     print("  Repo: \(AudioModelRepo.mimiPyTorchBF16.rawValue)")
 
-    // Attempt to download - this may fail in sandbox, but we document the path
-    do {
-      try await Acervo.ensureComponentReady(componentId) { progress in
-        print("  [\(progress.fileIndex + 1)/\(progress.totalFiles)] \(progress.fileName)")
-      }
-      print("✓ Mimi download completed")
-    } catch {
-      print("Note: Download failed (expected in sandbox): \(error)")
-      print("Component descriptor was properly registered and ready for download")
+    try await Acervo.ensureComponentReady(componentId) { progress in
+      print("  [\(progress.fileIndex + 1)/\(progress.totalFiles)] \(progress.fileName)")
     }
+    print("✓ Mimi download completed")
+
+    #expect(Acervo.isComponentReady(componentId), "Mimi component should be ready after download")
   }
 
-  @Test("Mimi Model Files Exist After Download")
+  @Test(
+    "Mimi Model Files Exist After Download",
+    .enabled(
+      if: ProcessInfo.processInfo.environment["MLXAUDIO_NETWORK_TESTS"] == "1",
+      "requires MLXAUDIO_NETWORK_TESTS=1"
+    )
+  )
   func testMimiModelFilesExist() async throws {
     print("\n=== Mimi Model File Verification Test ===")
 
     AudioModelManager.ensureComponentsRegistered()
 
-    do {
-      try await Acervo.ensureComponentReady(AudioModelRepo.mimiPyTorchBF16.componentId)
+    try await Acervo.ensureComponentReady(AudioModelRepo.mimiPyTorchBF16.componentId)
 
-      guard let modelDir = AudioModelManager.modelDirectory(for: .mimiPyTorchBF16) else {
-        throw TestError.modelDirectoryNotFound(AudioModelRepo.mimiPyTorchBF16.rawValue)
-      }
+    #expect(
+      Acervo.isComponentReady(AudioModelRepo.mimiPyTorchBF16.componentId),
+      "Mimi component should be ready after ensureComponentReady"
+    )
 
-      print("Mimi model directory: \(modelDir.path)")
-
-      // Verify required files exist
-      let requiredFiles = ["tokenizer-e351c8d8-checkpoint125.safetensors"]
-      for fileName in requiredFiles {
-        let filePath = modelDir.appendingPathComponent(fileName)
-        let exists = FileManager.default.fileExists(atPath: filePath.path)
-        print("  \(fileName): \(exists ? "✓" : "✗")")
-        #expect(exists, "\(fileName) should exist in Mimi model directory")
-      }
-
-      print("✓ All Mimi required files present")
-    } catch {
-      print("Note: File verification skipped (download may have failed): \(error)")
+    guard let modelDir = AudioModelManager.modelDirectory(for: .mimiPyTorchBF16) else {
+      throw TestError.modelDirectoryNotFound(AudioModelRepo.mimiPyTorchBF16.rawValue)
     }
+
+    print("Mimi model directory: \(modelDir.path)")
+
+    // Verify required files exist
+    let requiredFiles = ["tokenizer-e351c8d8-checkpoint125.safetensors"]
+    for fileName in requiredFiles {
+      let filePath = modelDir.appendingPathComponent(fileName)
+      let exists = FileManager.default.fileExists(atPath: filePath.path)
+      print("  \(fileName): \(exists ? "✓" : "✗")")
+      #expect(exists, "\(fileName) should exist in Mimi model directory")
+    }
+
+    print("✓ All Mimi required files present")
   }
 
-  @Test("Mimi Model SHA-256 Can Be Computed")
+  @Test(
+    "Mimi Model SHA-256 Can Be Computed",
+    .enabled(
+      if: ProcessInfo.processInfo.environment["MLXAUDIO_NETWORK_TESTS"] == "1",
+      "requires MLXAUDIO_NETWORK_TESTS=1"
+    )
+  )
   func testMimiModelChecksum() async throws {
     print("\n=== Mimi Model SHA-256 Verification Test ===")
 
     AudioModelManager.ensureComponentsRegistered()
 
-    do {
-      try await Acervo.ensureComponentReady(AudioModelRepo.mimiPyTorchBF16.componentId)
+    try await Acervo.ensureComponentReady(AudioModelRepo.mimiPyTorchBF16.componentId)
 
-      guard let modelDir = AudioModelManager.modelDirectory(for: .mimiPyTorchBF16) else {
-        throw TestError.modelDirectoryNotFound(AudioModelRepo.mimiPyTorchBF16.rawValue)
-      }
+    #expect(
+      Acervo.isComponentReady(AudioModelRepo.mimiPyTorchBF16.componentId),
+      "Mimi component should be ready after ensureComponentReady"
+    )
 
-      let fileName = "tokenizer-e351c8d8-checkpoint125.safetensors"
-      let filePath = modelDir.appendingPathComponent(fileName)
-
-      if FileManager.default.fileExists(atPath: filePath.path) {
-        let checksum = try computeFileSHA256(filePath.path)
-        print("Computing SHA-256 checksum for Mimi tokenizer:")
-        print("  \(fileName):")
-        print("    SHA-256: \(checksum)")
-      }
-
-      print("✓ SHA-256 checksum computed successfully")
-    } catch {
-      print("Note: Checksum verification skipped (download may have failed): \(error)")
+    guard let modelDir = AudioModelManager.modelDirectory(for: .mimiPyTorchBF16) else {
+      throw TestError.modelDirectoryNotFound(AudioModelRepo.mimiPyTorchBF16.rawValue)
     }
+
+    let fileName = "tokenizer-e351c8d8-checkpoint125.safetensors"
+    let filePath = modelDir.appendingPathComponent(fileName)
+
+    let checksum = try computeFileSHA256(filePath.path)
+    print("Computing SHA-256 checksum for Mimi tokenizer:")
+    print("  \(fileName):")
+    print("    SHA-256: \(checksum)")
+
+    print("✓ SHA-256 checksum computed successfully")
   }
 
   // MARK: - Model Availability Tests

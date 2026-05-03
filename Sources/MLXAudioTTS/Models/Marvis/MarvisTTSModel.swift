@@ -54,13 +54,13 @@ public final class MarvisTTSModel: Module {
     ) async throws {
         // Resolve the model directory through Acervo (download + integrity-verify as
         // needed) and load the tokenizer from the on-disk directory per
-        // swift-transformers 1.3.0 API.
+        // swift-tokenizers 0.3.2 API.
         let modelDirectoryURL = try await AudioModelManager.loadWithAcervoStrict(
             componentId: "marvis-tts-250m-8bit"
         ) { modelDir in
             modelDir
         }
-        let textTokenizer = try await AutoTokenizer.from(modelFolder: modelDirectoryURL)
+        let textTokenizer = try await AutoTokenizer.from(directory: modelDirectoryURL)
         let codec = try await Mimi.fromPretrained(progressHandler: progressHandler)
         let audioTokenizer = MimiTokenizer(codec)
         self.init(
@@ -186,8 +186,8 @@ public extension MarvisTTSModel {
 
         // Step 2: Load async dependencies (tokenizer + audio codec).
         // Tokenizer is loaded from the on-disk model directory per
-        // swift-transformers 1.3.0 API (`AutoTokenizer.from(modelFolder:)`).
-        let textTokenizer = try await AutoTokenizer.from(modelFolder: modelDirectoryURL)
+        // swift-tokenizers 0.3.2 API (`AutoTokenizer.from(directory:)`).
+        let textTokenizer = try await AutoTokenizer.from(directory: modelDirectoryURL)
         let codec = try await Mimi.fromPretrained(progressHandler: progressHandler)
         let audioTokenizer = MimiTokenizer(codec)
 
