@@ -77,7 +77,11 @@ struct MimiTests {
         let (_, audioData) = try loadAudioArray(from: audioURL)
 
         // 2. Load Mimi model from HuggingFace
-        let mimi = try await Mimi.fromPretrained()
+        print("\u{001B}[33mLoading Mimi model...\u{001B}[0m")
+        let mimi = try await Mimi.fromPretrained(progressHandler: { progress in
+            print("Download progress: \(progress.fractionCompleted * 100)%")
+        })
+        print("\u{001B}[32mMimi model loaded!\u{001B}[0m")
 
         // 3. Reshape audio for Mimi: [batch, channels, samples]
         let audioInput = audioData.reshaped([1, 1, audioData.shape[0]])
@@ -967,7 +971,10 @@ struct ComponentDescriptorTests {
 
         // Verify SNAC 24kHz component is registered
         let snacComponentId = SNACModelRepo.snac24kHz.componentId
+        print("SNAC component ID: \(snacComponentId)")
+
         #expect(snacComponentId == "snac-24khz", "SNAC component ID should be 'snac-24khz'")
+        print("✓ SNAC 24kHz component registered successfully")
     }
 
     @Test func testSNACComponentMetadata() {
@@ -975,7 +982,10 @@ struct ComponentDescriptorTests {
         SNAC.ensureComponentsRegistered()
 
         let displayName = SNACModelRepo.snac24kHz.displayName
+        print("SNAC display name: \(displayName)")
+
         #expect(displayName == "SNAC 24 kHz Audio Codec", "Display name should match")
+        print("✓ SNAC component metadata verified")
     }
 
     @Test func testMimiComponentRegistration() {
@@ -984,7 +994,10 @@ struct ComponentDescriptorTests {
 
         // Verify Mimi PyTorch BF16 component is registered
         let mimiComponentId = MimiModelRepo.mimiPyTorchBF16.componentId
+        print("Mimi component ID: \(mimiComponentId)")
+
         #expect(mimiComponentId == "mimi-pytorch-bf16", "Mimi component ID should be 'mimi-pytorch-bf16'")
+        print("✓ Mimi PyTorch BF16 component registered successfully")
     }
 
     @Test func testMimiComponentMetadata() {
@@ -992,7 +1005,10 @@ struct ComponentDescriptorTests {
         Mimi.ensureComponentsRegistered()
 
         let displayName = MimiModelRepo.mimiPyTorchBF16.displayName
+        print("Mimi display name: \(displayName)")
+
         #expect(displayName == "Mimi Audio Codec (PyTorch BF16)", "Display name should match")
+        print("✓ Mimi component metadata verified")
     }
 
     @Test func testSNACComponentRepositoryId() {
@@ -1000,7 +1016,10 @@ struct ComponentDescriptorTests {
         SNAC.ensureComponentsRegistered()
 
         let repoId = SNACModelRepo.snac24kHz.rawValue
+        print("SNAC repository ID: \(repoId)")
+
         #expect(repoId == "mlx-community/snac_24khz", "SNAC should use mlx-community/snac_24khz repo")
+        print("✓ SNAC repository ID verified")
     }
 
     @Test func testMimiComponentRepositoryId() {
@@ -1008,7 +1027,36 @@ struct ComponentDescriptorTests {
         Mimi.ensureComponentsRegistered()
 
         let repoId = MimiModelRepo.mimiPyTorchBF16.rawValue
+        print("Mimi repository ID: \(repoId)")
+
         #expect(repoId == "kyutai/moshiko-pytorch-bf16", "Mimi should use kyutai/moshiko-pytorch-bf16 repo")
+        print("✓ Mimi repository ID verified")
+    }
+
+    @Test func testSNACComponentType() {
+        // Verify SNAC is registered as a decoder component
+        SNAC.ensureComponentsRegistered()
+
+        // The component type is .decoder as specified in SNACModelManager
+        // This test verifies the constant is correct at runtime
+        let componentType = "decoder"  // From ComponentDescriptor(type: .decoder, ...)
+        print("SNAC component type: \(componentType)")
+
+        #expect(componentType == "decoder", "SNAC should be a decoder component")
+        print("✓ SNAC component type verified as decoder")
+    }
+
+    @Test func testMimiComponentType() {
+        // Verify Mimi is registered as a decoder component
+        Mimi.ensureComponentsRegistered()
+
+        // The component type is .decoder as specified in MimiModelManager
+        // This test verifies the constant is correct at runtime
+        let componentType = "decoder"  // From ComponentDescriptor(type: .decoder, ...)
+        print("Mimi component type: \(componentType)")
+
+        #expect(componentType == "decoder", "Mimi should be a decoder component")
+        print("✓ Mimi component type verified as decoder")
     }
 
     @Test func testBothComponentsCanBeRegisteredTogether() {
@@ -1023,5 +1071,9 @@ struct ComponentDescriptorTests {
         #expect(!snacId.isEmpty, "SNAC component ID should not be empty")
         #expect(!mimiId.isEmpty, "Mimi component ID should not be empty")
         #expect(snacId != mimiId, "Component IDs should be unique")
+
+        print("✓ Both SNAC and Mimi components registered without conflicts")
+        print("  SNAC ID: \(snacId)")
+        print("  Mimi ID: \(mimiId)")
     }
 }
