@@ -48,9 +48,9 @@ This document audits all tests in the mlx-audio-swift test suite that snapshot t
    - DACVAETests
    - ComponentDescriptorTests
 
-4. **Tests/AudioModelManagerIntegrationTests.swift** (integration-only, no snapshots)
+4. ~~Tests/AudioModelManagerIntegrationTests.swift~~ — deleted 2026-05-04 (aspirational SNAC/Mimi compliance, components not on CDN)
 
-5. **Tests/MLXAudioComponentDescriptorTests.swift** (registration-only, no snapshots)
+5. ~~Tests/MLXAudioComponentDescriptorTests.swift~~ — deleted 2026-05-04 (same reason)
 
 ### Test Pattern Analysis
 

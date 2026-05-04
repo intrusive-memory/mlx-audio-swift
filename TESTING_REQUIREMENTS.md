@@ -89,11 +89,7 @@ The mel-spectrogram is only verified by *parameter values* (`Qwen3TTSSpeakerEmbe
 
 ### I2. Integration tests pass without network
 
-**Problem.** `Tests/AudioModelManagerIntegrationTests.swift` tests 5/6/7 (`lines 182-348`) catch download exceptions and `print("Note: Download failed (expected in sandbox)")` rather than fail (`lines 199, 284`). They pass green on a machine with no network.
-
-**Required action.**
-- Either: skip explicitly via `#expect(throws: …)` so the test reports as skipped, not passed.
-- Or: gate on an env var (e.g., `MLXAUDIO_NETWORK_TESTS=1`) and assert hard when set.
+**Resolved 2026-05-04.** The `AudioModelManagerIntegrationTests` and `MLXAudioComponentDescriptorTests` files were deleted. They tested SNAC/Mimi compliance against components that aren't deployed to CDN — silent false-greens by construction. Removed rather than gated; if/when those components ship, write fresh tests against the real manifest.
 
 ### I3. Sampling / generation loop has no deterministic-seed tests
 

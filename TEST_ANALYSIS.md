@@ -133,7 +133,6 @@ The CI-running portion of the suite is **unusually clean**. Specifically there a
 
 - Nightly-only via `MLXAUDIO_NIGHTLY_RUN=1` (`KVCacheCorrectnessTests`, `WeightRoundTripTests`)
 - Local-only via the `bin/check-local-only-suites.sh` allowlist + nightly workflow (the model-loading suites)
-- Network-only via `MLXAUDIO_NETWORK_TESTS=1` (`AudioModelManagerIntegrationTests`)
 
 CI's `make test` block is fast (the coverage build for those 18 suites finishes in ~10 s of test execution on this machine). Nothing to move.
 

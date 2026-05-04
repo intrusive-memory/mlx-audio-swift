@@ -53,30 +53,6 @@ Read and follow all instructions in [AGENTS.md](AGENTS.md) before starting any t
     CODE_SIGNING_ALLOWED=NO
   ```
 
-## Network-Gated Integration Tests
-
-`AudioModelManagerIntegrationTests` contains 6 tests that exercise actual model
-downloads via `Acervo.ensureComponentReady()`. These tests are **skipped by
-default**. To run them, set `MLXAUDIO_NETWORK_TESTS=1` in the process environment:
-
-```bash
-MLXAUDIO_NETWORK_TESTS=1 xcodebuild test \
-  -scheme MLXAudio-Package -destination 'platform=macOS' \
-  -only-testing:MLXAudioTests/AudioModelManagerIntegrationTests \
-  CODE_SIGNING_ALLOWED=NO
-```
-
-When `MLXAUDIO_NETWORK_TESTS=1` is set:
-- Download exceptions propagate (test fails if network is blocked)
-- `Acervo.isComponentReady()` is asserted true after each download
-- File-existence and SHA-256 checks execute against the downloaded files
-
-The nightly workflow (`.github/workflows/nightly-tests.yaml`, Sortie 9) sets
-`MLXAUDIO_NETWORK_TESTS=1` so these tests run with the warm `mlx-models-v2` cache.
-
-Without the env var (normal `make test` / CI), all 6 tests report as **skipped**,
-not passed — preventing silent false-greens.
-
 ## Local-Only Test Suites (require model downloads — NOT in CI-safe list above)
 
 These suites require multi-GB model files from the `mlx-models-v2` cache
