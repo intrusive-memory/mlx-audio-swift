@@ -49,7 +49,7 @@ CI_TESTS = \
 	-only-testing:MLXAudioTests/UnigramTokenizerRoundTripTests \
 	-only-testing:MLXAudioTests/ParityFixtureLoaderSmokeTests
 
-.PHONY: help build test test-ci test-all clean archive format lint
+.PHONY: help build test test-ci clean archive format lint
 
 help: ## Show this help message
 	@echo 'Usage: make [target]'
@@ -70,13 +70,6 @@ test-ci: ## Run CI-safe tests only (no model downloads)
 		-scheme $(SCHEME) \
 		-destination $(DESTINATION) \
 		$(CI_TESTS) \
-		$(CODE_SIGNING)
-
-test-all: ## Run all tests (including those requiring model downloads)
-	$(XCODEBUILD) test \
-		-scheme $(SCHEME) \
-		-destination $(DESTINATION) \
-		-only-testing:MLXAudioTests/AudioModelManagerIntegrationTests \
 		$(CODE_SIGNING)
 
 clean: ## Clean build artifacts
