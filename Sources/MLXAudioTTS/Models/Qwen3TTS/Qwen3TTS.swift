@@ -5,6 +5,7 @@
 import MLXNN
 @preconcurrency import MLXLMCommon
 import MLXAudioCore
+import SwiftAcervo
 import Tokenizers
 import Foundation
 
@@ -1591,18 +1592,16 @@ public final class Qwen3TTSModel: Module, SpeechGenerationModel, @unchecked Send
     ///   correct Acervo componentId via variant dispatch.
     /// - Returns: A fully initialised ``Qwen3TTSModel`` ready for generation.
     public static func fromPretrained(_ modelRepo: String) async throws -> Qwen3TTSModel {
-        // Map HuggingFace repo ID → Acervo componentId (variant dispatch)
+        // Resolve HuggingFace repo ID → Acervo componentId.
+        // Convention: componentId == Acervo.slugify(repoId) == CDN slug.
+        // Legacy exception: VyvoTTS still ships under its hand-rolled `vyvo-tts-beta-4bit` id.
         let componentId: String
-        switch modelRepo {
-        case "mlx-community/VyvoTTS-EN-Beta-4bit":
+        if modelRepo == "mlx-community/VyvoTTS-EN-Beta-4bit" {
             componentId = "vyvo-tts-beta-4bit"
-        case "mlx-community/Qwen3-TTS-12Hz-1.7B-Base-bf16":
-            componentId = "qwen3-tts-12hz-1.7b-base-bf16"
-        case "mlx-community/Qwen3-TTS-12Hz-1.7B-VoiceDesign-bf16":
-            componentId = "qwen3-tts-12hz-1.7b-voice-design-bf16"
-        case "mlx-community/Qwen3-TTS-12Hz-1.7B-CustomVoice-bf16":
-            componentId = "qwen3-tts-12hz-1.7b-custom-voice-bf16"
-        default:
+        } else {
+            componentId = Acervo.slugify(modelRepo)
+        }
+        guard Acervo.component(componentId) != nil else {
             throw NSError(
                 domain: "MLXAudioTTS.Qwen3TTS",
                 code: 1,

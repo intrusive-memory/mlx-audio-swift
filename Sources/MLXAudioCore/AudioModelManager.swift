@@ -154,12 +154,14 @@ public enum AudioModelRepo: String, CaseIterable, Sendable {
       return "marvis-tts-250m-8bit"
     case .pocketTTS:
       return "pocket-tts"
+    // Qwen3-TTS variants resolve to `Acervo.slugify(rawValue)`, which matches the
+    // CDN slug under which the manifest is published at <CDN_BASE>/models/<slug>/manifest.json.
     case .qwen3TTS12Hz1_7BBaseBF16:
-      return "qwen3-tts-12hz-1.7b-base-bf16"
+      return Acervo.slugify(rawValue)
     case .qwen3TTS12Hz1_7BVoiceDesignBF16:
-      return "qwen3-tts-12hz-1.7b-voice-design-bf16"
+      return Acervo.slugify(rawValue)
     case .qwen3TTS12Hz1_7BCustomVoiceBF16:
-      return "qwen3-tts-12hz-1.7b-custom-voice-bf16"
+      return Acervo.slugify(rawValue)
     case .dacVAEWatermarked:
       return "dac-vae"
     case .encodec24kHz:
