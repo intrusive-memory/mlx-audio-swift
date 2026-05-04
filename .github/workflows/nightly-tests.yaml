@@ -11,6 +11,7 @@ concurrency:
 
 env:
   MLXAUDIO_NETWORK_TESTS: "1"
+  ACERVO_APP_GROUP_ID: group.intrusive-memory.models
 
 jobs:
   nightly-local-only:
