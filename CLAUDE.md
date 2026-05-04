@@ -1,6 +1,6 @@
 # Claude Code Instructions
 
-Read and follow all instructions in [AGENTS.md](AGENTS.md) before starting any task.
+Read and follow all instructions in [AGENTS.md](AGENTS.md) before starting any task. App Group configuration (required for SwiftAcervo model storage) is documented in [AGENTS.md § App Group configuration](AGENTS.md#app-group-configuration-required).
 
 ## Additional Rules for Claude
 
@@ -56,7 +56,7 @@ Read and follow all instructions in [AGENTS.md](AGENTS.md) before starting any t
 ## Local-Only Test Suites (require model downloads — NOT in CI-safe list above)
 
 These suites require multi-GB model files from the `mlx-models-v2` cache
-(`~/Library/SharedModels`). They are intentionally excluded from the CI-safe
+(`~/Library/Group Containers/group.intrusive-memory.models/SharedModels`). They are intentionally excluded from the CI-safe
 `make test` / `xcodebuild test` block above. Run them locally or in the
 nightly workflow (`.github/workflows/nightly-tests.yaml`, Sortie 9).
 
