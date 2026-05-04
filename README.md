@@ -38,7 +38,7 @@ Audio codecs (SNAC, Mimi) register their model variants with the **SwiftAcervo C
 
 - **Centralized component metadata**: HuggingFace repo IDs, required files, memory requirements stored in one place
 - **Intelligent downloads**: Acervo knows exactly what files to fetch before model code runs
-- **Shared model cache**: All `intrusive-memory` projects share codecs and TTS models at `~/Library/SharedModels/`
+- **Shared model cache**: All `intrusive-memory` projects share codecs and TTS models at `~/Library/Group Containers/group.intrusive-memory.models/SharedModels/`
 - **Graceful fallback**: Model loading continues if component registration fails
 
 ## Installation
@@ -170,12 +170,12 @@ All audio models and codecs are managed through **SwiftAcervo**, providing autom
 
 Models download automatically on first use to:
 ```
-~/Library/SharedModels/<namespace>_<repo>/
+~/Library/Group Containers/group.intrusive-memory.models/SharedModels/<namespace>_<repo>/
 ```
 
 For example, `mlx-community/Qwen3-TTS-12Hz-1.7B-Base-bf16` becomes:
 ```
-~/Library/SharedModels/mlx-community_Qwen3-TTS-12Hz-1.7B-Base-bf16/
+~/Library/Group Containers/group.intrusive-memory.models/SharedModels/mlx-community_Qwen3-TTS-12Hz-1.7B-Base-bf16/
 ```
 
 All intrusive-memory projects share this directory, so models downloaded by one app are immediately available to others without re-downloading.
@@ -285,6 +285,19 @@ Additional usage examples can be found in the test files.
 - Uses [swift-transformers](https://github.com/huggingface/swift-transformers)
 - Uses [SwiftAcervo](https://github.com/tannerdsilva/SwiftAcervo) for model caching
 - Inspired by [MLX Audio (Python)](https://github.com/Blaizzy/mlx-audio)
+
+## App Group configuration (required)
+
+This package depends on [SwiftAcervo](https://github.com/intrusive-memory/SwiftAcervo) for shared model storage. SwiftAcervo v0.10.0 resolves its App Group ID in this order: `ACERVO_APP_GROUP_ID` env var → `com.apple.security.application-groups` entitlement (macOS only) → `fatalError`. There is **no silent fallback**.
+
+- **Signed UI apps (macOS / iOS)**: declare `com.apple.security.application-groups` with `group.intrusive-memory.models` in your `.entitlements` file. iOS apps additionally need `ACERVO_APP_GROUP_ID=group.intrusive-memory.models` in the launch environment.
+- **CLI tools, scripts, CI jobs, test runners**: export `ACERVO_APP_GROUP_ID=group.intrusive-memory.models` in the shell or job environment. The standard place is `~/.zprofile`:
+
+    ```sh
+    export ACERVO_APP_GROUP_ID=group.intrusive-memory.models
+    ```
+
+Without this, `Acervo.sharedModelsDirectory` traps with `fatalError`. See [SwiftAcervo's USAGE.md](https://github.com/intrusive-memory/SwiftAcervo/blob/main/USAGE.md) for full details.
 
 ## License
 
