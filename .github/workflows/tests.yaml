@@ -12,6 +12,7 @@ concurrency:
 
 env:
   MLX_AUDIO_CACHE: ~/Library/SharedModels
+  ACERVO_APP_GROUP_ID: group.intrusive-memory.models
 
   # Models to download for CI testing (keep total under 10GB for GH Actions cache limit)
   # Format: "huggingface-repo-id|local-dir-name" per line
