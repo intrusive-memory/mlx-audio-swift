@@ -156,13 +156,13 @@ public struct AudioGenerateParameters {
 
 ### Model cache — SwiftAcervo shared directory
 
-All `intrusive-memory` projects share models via **SwiftAcervo** at `~/Library/SharedModels/`. Models downloaded by any app are available to all others.
+All `intrusive-memory` projects share models via **SwiftAcervo** at `~/Library/Group Containers/group.intrusive-memory.models/SharedModels/`. Models downloaded by any app are available to all others.
 
 | Component | Path |
 |-----------|------|
-| **Shared models** | `~/Library/SharedModels/<namespace>_<repo>/` |
+| **Shared models** | `~/Library/Group Containers/group.intrusive-memory.models/SharedModels/<namespace>_<repo>/` |
 | **Legacy path** (auto-migrated) | `~/Library/Caches/intrusive-memory/Models/Audio/<namespace>_<repo>/` |
-| **Marvis prompt cache** | `~/Library/SharedModels/Marvis-AI_marvis-tts-250m-v0.2-MLX-8bit/prompt_cache/` |
+| **Marvis prompt cache** | `~/Library/Group Containers/group.intrusive-memory.models/SharedModels/Marvis-AI_marvis-tts-250m-v0.2-MLX-8bit/prompt_cache/` |
 
 The `<namespace>_<repo>` directory name is the HuggingFace repo ID with `/` replaced by `_` (e.g., `mlx-community/Qwen3-TTS-12Hz-1.7B-Base-bf16` → `mlx-community_Qwen3-TTS-12Hz-1.7B-Base-bf16`).
 
@@ -287,7 +287,7 @@ public static func fromPretrained(_ modelRepo: String) async throws -> SNAC {
 
 All audio models (P1 codecs and TTS) download to:
 ```
-~/Library/SharedModels/<namespace>_<repo>/
+~/Library/Group Containers/group.intrusive-memory.models/SharedModels/<namespace>_<repo>/
 ```
 
 The shared cache allows:
@@ -299,7 +299,7 @@ Legacy paths (`~/Library/Caches/intrusive-memory/Models/`) are auto-migrated on 
 
 ### Model loading
 
-Models are loaded from HuggingFace via `fromPretrained()`. Internally this calls `ModelResolver.resolve()` (SwiftAcervo) which caches to `~/Library/SharedModels/`.
+Models are loaded from HuggingFace via `fromPretrained()`. Internally this calls `ModelResolver.resolve()` (SwiftAcervo) which caches to `~/Library/Group Containers/group.intrusive-memory.models/SharedModels/`.
 
 ### TTSModelUtils — model type dispatch
 
@@ -493,23 +493,6 @@ Tests use **Swift Testing** framework (`@Test`, `#expect`, `@Suite`), not XCTest
 | `Qwen3TTSGenerateICLTests` | MLXAudioTTSTests.swift | — | ICL generation validation (missing encoder, tokenizer, ref audio/text) |
 | `Qwen3TTSSpeakerEncoderSmokeTests` | MLXAudioTTSTests.swift | — | Smoke tests for speaker encoder integration with Base model |
 
-### Network-gated integration tests — MLXAUDIO_NETWORK_TESTS=1
-
-`AudioModelManagerIntegrationTests` (6 tests) downloads models via
-`Acervo.ensureComponentReady()`. These tests are **skipped by default** unless
-`MLXAUDIO_NETWORK_TESTS=1` is set in the environment:
-
-```bash
-MLXAUDIO_NETWORK_TESTS=1 xcodebuild test \
-  -scheme MLXAudio-Package -destination 'platform=macOS' \
-  -only-testing:MLXAudioTests/AudioModelManagerIntegrationTests \
-  CODE_SIGNING_ALLOWED=NO
-```
-
-When the env var is set: download exceptions propagate (hard failure), and
-`Acervo.isComponentReady()` is asserted true after each download. Without the
-env var (e.g., `make test` in CI), all 6 tests report **skipped** — not passed.
-
 ### Test suites that require model downloads (local only)
 
 | Suite | File | Model required |
@@ -578,7 +561,7 @@ env var (e.g., `make test` in CI), all 6 tests report **skipped** — not passed
 
 **Triggers**: `workflow_dispatch` + PRs to `main` (opened, synchronize, reopened)
 
-**Model cache**: `~/Library/SharedModels` cached with key `mlx-models-v2`. Prime via `workflow_dispatch`. Model tests skip when cache is cold.
+**Model cache**: `~/Library/Group Containers/group.intrusive-memory.models/SharedModels` cached with key `mlx-models-v2`. Prime via `workflow_dispatch`. Model tests skip when cache is cold.
 
 ## Adding a New TTS Model
 
@@ -601,9 +584,22 @@ env var (e.g., `make test` in CI), all 6 tests report **skipped** — not passed
 
 - **Never use `swift build`/`swift test`** — always `xcodebuild`
 - **PyTorch weight conversion**: Conv1d weights need transposition from `(O,I,K)` to `(O,K,I)`, Conv2d from `(O,I,H,W)` to `(O,H,W,I)` in `sanitize()`
-- **Model cache path**: `~/Library/SharedModels/<namespace>_<repo>` — replace `/` with `_` in repo ID. All `intrusive-memory` projects share models via SwiftAcervo
+- **Model cache path**: `~/Library/Group Containers/group.intrusive-memory.models/SharedModels/<namespace>_<repo>` — replace `/` with `_` in repo ID. All `intrusive-memory` projects share models via SwiftAcervo
 - **Bundle resources in tests**: Use `.copy("media")` in Package.swift, access via `Bundle.module`
 - **Concurrency warnings**: Use `@preconcurrency import MLX` and `@unchecked Sendable` on Module subclasses
 - **CI test selection**: Only add tests to CI that work without model downloads. Model-dependent tests go in the `model-tests` job
 - **@ModuleInfo mutation**: Never mutate `@ModuleInfo` properties directly after init; use `update(modules:)` or `update(parameters:)` instead
 - **ICL repetition penalty**: Minimum 1.5 for ICL generation to prevent code degeneration with long reference prefills
+
+## App Group configuration (required)
+
+This package depends on [SwiftAcervo](https://github.com/intrusive-memory/SwiftAcervo) for shared model storage. SwiftAcervo v0.10.0 resolves its App Group ID in this order: `ACERVO_APP_GROUP_ID` env var → `com.apple.security.application-groups` entitlement (macOS only) → `fatalError`. There is **no silent fallback**.
+
+- **Signed UI apps (macOS / iOS)**: declare `com.apple.security.application-groups` with `group.intrusive-memory.models` in your `.entitlements` file. iOS apps additionally need `ACERVO_APP_GROUP_ID=group.intrusive-memory.models` in the launch environment.
+- **CLI tools, scripts, CI jobs, test runners**: export `ACERVO_APP_GROUP_ID=group.intrusive-memory.models` in the shell or job environment. The standard place is `~/.zprofile`:
+
+    ```sh
+    export ACERVO_APP_GROUP_ID=group.intrusive-memory.models
+    ```
+
+Without this, `Acervo.sharedModelsDirectory` traps with `fatalError`. See [SwiftAcervo's USAGE.md](https://github.com/intrusive-memory/SwiftAcervo/blob/main/USAGE.md) for full details.

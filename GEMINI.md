@@ -1,6 +1,6 @@
 # Gemini Instructions
 
-Read and follow all instructions in [AGENTS.md](AGENTS.md) before starting any task.
+Read and follow all instructions in [AGENTS.md](AGENTS.md) before starting any task. App Group configuration (required for SwiftAcervo model storage) is documented in [AGENTS.md § App Group configuration](AGENTS.md#app-group-configuration-required).
 
 ## Additional Rules for Gemini
 
