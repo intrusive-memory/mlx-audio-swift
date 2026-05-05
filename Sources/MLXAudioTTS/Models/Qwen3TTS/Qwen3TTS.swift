@@ -1592,6 +1592,7 @@ public final class Qwen3TTSModel: Module, SpeechGenerationModel, @unchecked Send
     ///   correct Acervo componentId via variant dispatch.
     /// - Returns: A fully initialised ``Qwen3TTSModel`` ready for generation.
     public static func fromPretrained(_ modelRepo: String) async throws -> Qwen3TTSModel {
+        AudioModelManager.ensureComponentsRegistered()
         // Resolve HuggingFace repo ID → Acervo componentId.
         // Convention: componentId == Acervo.slugify(repoId) == CDN slug.
         // Legacy exception: VyvoTTS still ships under its hand-rolled `vyvo-tts-beta-4bit` id.
