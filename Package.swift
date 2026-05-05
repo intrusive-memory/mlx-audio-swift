@@ -1,32 +1,5 @@
 // swift-tools-version:6.2
-import Foundation
 import PackageDescription
-
-// In CI we always pin to released remotes. Locally, prefer a sibling checkout
-// at ../<name> if present so in-flight changes can be exercised end-to-end
-// without publishing a release. Falls back to the remote pin if the sibling
-// directory is missing, so fresh clones still build.
-let useLocalSiblings = ProcessInfo.processInfo.environment["CI"] != "true"
-
-func sibling(_ name: String, remote: String, from version: Version) -> Package.Dependency {
-  let localPath = "../\(name)"
-  if useLocalSiblings && FileManager.default.fileExists(atPath: localPath) {
-    return .package(path: localPath)
-  }
-  return .package(url: remote, .upToNextMajor(from: version))
-}
-
-/// Same sibling-priority pattern as ``sibling(_:remote:from:)`` but pins to a
-/// remote branch when no local sibling exists. Use only when a temporary
-/// pre-release dependency on a feature branch is required; switch back to the
-/// version-pinned ``sibling(_:remote:from:)`` once the upstream tags a release.
-func sibling(_ name: String, remote: String, branch: String) -> Package.Dependency {
-  let localPath = "../\(name)"
-  if useLocalSiblings && FileManager.default.fileExists(atPath: localPath) {
-    return .package(path: localPath)
-  }
-  return .package(url: remote, branch: branch)
-}
 
 let package = Package(
     name: "MLXAudio",
@@ -69,10 +42,7 @@ let package = Package(
             .upToNextMajor(from: "0.2.0"), traits: ["Swift"]),
         .package(url: "https://github.com/DePasqualeOrg/swift-tokenizers.git",
             .upToNextMajor(from: "0.4.3"), traits: ["Swift"]),
-        sibling(
-          "SwiftAcervo",
-          remote: "https://github.com/intrusive-memory/SwiftAcervo.git",
-          from: "0.11.1"),
+        .package(url: "https://github.com/intrusive-memory/SwiftAcervo.git", .upToNextMajor(from: "0.11.1")),
         .package(url: "https://github.com/apple/swift-numerics",
             .upToNextMajor(from: "1.1.1")),
         .package(url: "https://github.com/apple/swift-collections.git",
