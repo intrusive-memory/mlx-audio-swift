@@ -49,16 +49,27 @@ let package = Package(
         ),
     ],
     dependencies: [
-        .package(url: "https://github.com/ml-explore/mlx-swift.git", .upToNextMajor(from: "0.31.3")),
-        .package(url: "https://github.com/ml-explore/mlx-swift-lm.git", .upToNextMajor(from: "3.31.3")),
-        .package(url: "https://github.com/DePasqualeOrg/swift-tokenizers-mlx", .upToNextMajor(from: "0.2.0"), traits: ["Swift"]),
-        .package(url: "https://github.com/DePasqualeOrg/swift-tokenizers.git", .upToNextMajor(from: "0.4.3"), traits: ["Swift"]),
-        sibling("SwiftAcervo", remote: "https://github.com/intrusive-memory/SwiftAcervo.git", from: "0.11.1"),
-        // Transitive dependencies for Xcode 26 compatibility
-        .package(url: "https://github.com/apple/swift-numerics", .upToNextMajor(from: "1.1.1")),
-        .package(url: "https://github.com/apple/swift-collections.git", .upToNextMajor(from: "1.4.1")),
-        .package(url: "https://github.com/apple/swift-crypto.git", .upToNextMajor(from: "4.5.0")),
-        .package(url: "https://github.com/ibireme/yyjson.git", .upToNextMajor(from: "0.12.0")),
+        .package(url: "https://github.com/ml-explore/mlx-swift.git",
+            .upToNextMajor(from: "0.31.3")),
+        .package(url: "https://github.com/ml-explore/mlx-swift-lm.git",
+            .upToNextMajor(from: "3.31.3")),
+        .package(url: "https://github.com/DePasqualeOrg/swift-tokenizers-mlx",
+            .upToNextMajor(from: "0.2.0"), traits: ["Swift"]),
+        .package(url: "https://github.com/DePasqualeOrg/swift-tokenizers.git",
+            .upToNextMajor(from: "0.4.3"), traits: ["Swift"]),
+        sibling(
+            "SwiftAcervo",
+            remote: "https://github.com/intrusive-memory/SwiftAcervo.git",
+            from: "0.11.1"
+        ),
+        .package(url: "https://github.com/apple/swift-numerics",
+            .upToNextMajor(from: "1.1.1")),
+        .package(url: "https://github.com/apple/swift-collections.git",
+            .upToNextMajor(from: "1.4.1")),
+        .package(url: "https://github.com/apple/swift-crypto.git",
+            .upToNextMajor(from: "4.5.0")),
+        .package(url: "https://github.com/ibireme/yyjson.git",
+            .upToNextMajor(from: "0.12.0")),
     ],
     targets: [
         // MARK: - MLXAudioCore
@@ -168,7 +179,7 @@ let package = Package(
             ],
             path: "Sources/MLXAudioUI"
         ),
-        
+
         .executableTarget(
             name: "mlx-audio-swift-tts",
             dependencies: ["MLXAudioCore", "MLXAudioTTS", "MLXAudioSTT"],
