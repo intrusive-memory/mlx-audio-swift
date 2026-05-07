@@ -37,6 +37,12 @@ public final class Qwen3TTSModel: Module, SpeechGenerationModel, @unchecked Send
         }()
         self.config = config
         self.talker = Qwen3TTSTalkerForConditionalGeneration(config: talkerConfig)
+        super.init()
+        Telemetry.trackLifecycle(self, className: "Qwen3TTS.Model")
+    }
+
+    deinit {
+        Telemetry.trackLifecycleEnd(className: "Qwen3TTS.Model")
     }
 
     // MARK: - Speaker Encoder

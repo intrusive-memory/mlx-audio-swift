@@ -44,6 +44,11 @@ public final class MarvisTTSModel: Module {
         super.init()
 
         model.resetCaches()
+        Telemetry.trackLifecycle(self, className: "MarvisTTS.Model")
+    }
+
+    deinit {
+        Telemetry.trackLifecycleEnd(className: "MarvisTTS.Model")
     }
 
     public convenience init(

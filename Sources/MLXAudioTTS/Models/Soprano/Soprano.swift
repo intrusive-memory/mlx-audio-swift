@@ -220,6 +220,12 @@ public class SopranoModel: Module, KVCacheDimensionProvider, SpeechGenerationMod
         if !config.tieWordEmbeddings {
             self._lmHead.wrappedValue = Linear(config.hiddenSize, config.vocabularySize, bias: false)
         }
+        super.init()
+        Telemetry.trackLifecycle(self, className: "SopranoTTS.Model")
+    }
+
+    deinit {
+        Telemetry.trackLifecycleEnd(className: "SopranoTTS.Model")
     }
 
     public var sampleRate: Int {

@@ -35,6 +35,7 @@ public final class PocketTTSModel: Module, SpeechGenerationModel, @unchecked Sen
         self._mimi = ModuleInfo(wrappedValue: mimi)
         self.speaker_proj_weight = MLXArray.zeros([config.flowLM.transformer.dModel, config.mimi.quantizer.outputDimension])
         super.init()
+        Telemetry.trackLifecycle(self, className: "PocketTTS.Model")
     }
 
     /// Testing-only init: constructs a PocketTTSModel with pre-built sub-models,
@@ -47,6 +48,11 @@ public final class PocketTTSModel: Module, SpeechGenerationModel, @unchecked Sen
         self._mimi = ModuleInfo(wrappedValue: mimi)
         self.speaker_proj_weight = MLXArray.zeros([config.flowLM.transformer.dModel, config.mimi.quantizer.outputDimension])
         super.init()
+        Telemetry.trackLifecycle(self, className: "PocketTTS.Model")
+    }
+
+    deinit {
+        Telemetry.trackLifecycleEnd(className: "PocketTTS.Model")
     }
 
     public static func fromConfig(_ config: PocketTTSModelConfig, modelFolder: URL) async throws -> PocketTTSModel {

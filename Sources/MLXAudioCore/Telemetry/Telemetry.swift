@@ -75,11 +75,16 @@ public enum Telemetry {
         await CounterStore.shared.reset()
     }
 
-    // MARK: - Internal lifecycle hook (S4 — used by WU-2)
+    // MARK: - Public lifecycle hook (S4 + S6 — used by WU-2)
 
     // trackLifecycle uses a detached fire-and-forget Task so init / deinit do not block on the actor.
-    /// Internal lifecycle helper used by WU-2's instrumented
-    /// `init` / `deinit` call sites.
+    /// Public lifecycle helper used by WU-2's instrumented
+    /// `init` / `deinit` call sites across all modules
+    /// (`MLXAudioCore`, `MLXAudioTTS`, `MLXAudioSTT`, `MLXAudioCodecs`).
+    ///
+    /// Originally declared `internal` in S4; promoted to `public` in S6
+    /// when cross-module model classes (`LlamaTTSModel`, `GLMASRModel`, etc.)
+    /// needed direct access from their sibling target's `init` / `deinit`.
     ///
     /// **Fire-and-forget contract**: this function spawns a detached
     /// `Task` that calls `CounterStore.shared.increment(className:)` and
@@ -94,7 +99,7 @@ public enum Telemetry {
     ///
     /// No-op when `Telemetry.level == .off` — gated cheaply on the
     /// caller side too via the early-return inside `CounterStore.increment`.
-    internal static func trackLifecycle(_ instance: AnyObject, className: String) {
+    public static func trackLifecycle(_ instance: AnyObject, className: String) {
         _ = instance // capture-by-reference only; no retention
         guard level != .off else { return }
         Task.detached(priority: .background) {
@@ -103,7 +108,10 @@ public enum Telemetry {
     }
 
     // trackLifecycleEnd uses a detached fire-and-forget Task so deinit does not block on the actor.
-    /// Internal lifecycle helper paired with `trackLifecycle(_:className:)`.
+    /// Public lifecycle helper paired with `trackLifecycle(_:className:)`.
+    ///
+    /// Originally declared `internal` in S4; promoted to `public` in S6
+    /// alongside `trackLifecycle(_:className:)`.
     ///
     /// **Fire-and-forget contract**: this function spawns a detached
     /// `Task` that calls `CounterStore.shared.decrement(className:)` and
@@ -114,7 +122,7 @@ public enum Telemetry {
     /// label is the link between `trackLifecycle` and `trackLifecycleEnd`.
     ///
     /// No-op when `Telemetry.level == .off`.
-    internal static func trackLifecycleEnd(className: String) {
+    public static func trackLifecycleEnd(className: String) {
         guard level != .off else { return }
         Task.detached(priority: .background) {
             await CounterStore.shared.decrement(className: className)

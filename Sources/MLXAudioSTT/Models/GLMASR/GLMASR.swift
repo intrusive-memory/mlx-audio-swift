@@ -304,6 +304,12 @@ public class GLMASRModel: Module {
 
         self._audioEncoder.wrappedValue = AudioEncoder(config: config)
         self._languageModel.wrappedValue = GLMASRLanguageModel(config: config.lmConfig)
+        super.init()
+        Telemetry.trackLifecycle(self, className: "GLMASR.Model")
+    }
+
+    deinit {
+        Telemetry.trackLifecycleEnd(className: "GLMASR.Model")
     }
 
     // MARK: - Public API

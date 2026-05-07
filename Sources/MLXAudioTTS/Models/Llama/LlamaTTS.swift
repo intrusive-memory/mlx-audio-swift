@@ -374,6 +374,12 @@ public class LlamaTTSModel: Module, KVCacheDimensionProvider, SpeechGenerationMo
         if !args.tieWordEmbeddings {
             self._lmHead.wrappedValue = Linear(args.hiddenSize, args.vocabularySize, bias: false)
         }
+        super.init()
+        Telemetry.trackLifecycle(self, className: "LlamaTTS.Model")
+    }
+
+    deinit {
+        Telemetry.trackLifecycleEnd(className: "LlamaTTS.Model")
     }
 
     // MARK: - Parse Output

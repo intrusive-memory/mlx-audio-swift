@@ -706,6 +706,12 @@ public class Qwen3ASRModel: Module {
                 bias: false
             )
         }
+        super.init()
+        Telemetry.trackLifecycle(self, className: "Qwen3ASR.Model")
+    }
+
+    deinit {
+        Telemetry.trackLifecycleEnd(className: "Qwen3ASR.Model")
     }
 
     // MARK: - Audio Features
