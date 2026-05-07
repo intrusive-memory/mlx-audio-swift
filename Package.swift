@@ -69,7 +69,8 @@ let package = Package(
             ],
             path: "Sources/MLXAudioCore",
             swiftSettings: [
-                .unsafeFlags(["-Xfrontend", "-warn-concurrency"], .when(configuration: .debug))
+                .unsafeFlags(["-Xfrontend", "-warn-concurrency"], .when(configuration: .debug)),
+                .define("MLXAUDIO_TELEMETRY_FULL", .when(configuration: .debug)),
             ]
         ),
 
@@ -182,6 +183,9 @@ let package = Package(
             path: "Tests",
             resources: [
                 .copy("media")
+            ],
+            swiftSettings: [
+                .define("MLXAUDIO_TELEMETRY_FULL", .when(configuration: .debug)),
             ]
         ),
     ]
