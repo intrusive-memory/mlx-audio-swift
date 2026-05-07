@@ -51,11 +51,17 @@ struct TelemetryCounterStoreTests {
     /// no-op `snapshot()` is enough to serialize behind any prior
     /// detached enqueues — the actor processes messages FIFO per
     /// caller, and `Task.detached` enqueues land in the actor's queue
-    /// before we await our snapshot. To be robust against scheduling,
-    /// we also yield twice and re-snapshot.
+    /// before we await our snapshot. To be robust against scheduling
+    /// of background-priority tasks, we yield several times before
+    /// snapshotting.
     private func drain() async -> TelemetrySnapshot {
-        await Task.yield()
-        await Task.yield()
+        // Background-priority Tasks may need several cooperative-scheduler
+        // turns before they execute. Yield 5 times per drain call so the
+        // loop's 50-iteration cap gives ~250 total yields — enough on most
+        // hardware without making the test noticeably slower.
+        for _ in 0..<5 {
+            await Task.yield()
+        }
         return await Telemetry.snapshot()
     }
 

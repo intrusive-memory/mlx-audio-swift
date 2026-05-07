@@ -1,4 +1,5 @@
 import Foundation
+import MLX
 import os
 
 /// Test-only protocol for capturing operation-interval signposts.
@@ -24,6 +25,14 @@ import os
 internal protocol TelemetryIntervalRecorder: AnyObject, Sendable {
     func recordBegin(name: String, subsystem: String, message: String)
     func recordEnd(name: String, subsystem: String, message: String)
+    /// Called synchronously in the `defer` block when `Telemetry.level >= .memory`,
+    /// BEFORE the fire-and-forget Task forwards the delta to `CounterStore`.
+    /// Default implementation is a no-op so existing recorders need not change.
+    func recordMemoryDelta(name: String, before: Int, after: Int, delta: Int)
+}
+
+extension TelemetryIntervalRecorder {
+    func recordMemoryDelta(name: String, before: Int, after: Int, delta: Int) {}
 }
 #endif
 
@@ -92,6 +101,9 @@ extension Telemetry {
         let state = signposter.beginInterval(name, id: id, "\(message)")
         let nameString = "\(name)"
         #if MLXAUDIO_TELEMETRY_FULL
+        // Capture MLX memory before the body when at .memory level or higher.
+        // The read is synchronous and gated so it only fires at level 3+.
+        let memBefore: Int = (Telemetry.level >= .memory) ? MLX.Memory.activeMemory : 0
         Telemetry._intervalRecorder?.recordBegin(
             name: nameString,
             subsystem: subsystem,
@@ -106,6 +118,24 @@ extension Telemetry {
                 subsystem: subsystem,
                 message: message
             )
+            // Capture MLX memory after the body, emit before/after/delta as a
+            // signpost event so Instruments shows memory metadata on the interval,
+            // notify the test recorder (synchronously, no CounterStore race), and
+            // forward the delta to CounterStore for `TelemetrySnapshot.perOpDeltas`.
+            if Telemetry.level >= .memory {
+                let memAfter = MLX.Memory.activeMemory
+                let delta = memAfter - memBefore
+                signposter.emitEvent(
+                    name, id: id,
+                    "memory before:\(memBefore) after:\(memAfter) delta:\(delta)"
+                )
+                Telemetry._intervalRecorder?.recordMemoryDelta(
+                    name: nameString, before: memBefore, after: memAfter, delta: delta
+                )
+                Task.detached(priority: .background) {
+                    await CounterStore.shared.recordPerOpDelta(opName: nameString, delta: delta)
+                }
+            }
             #endif
         }
         return try body()
@@ -115,6 +145,11 @@ extension Telemetry {
     /// `OSSignposter.beginInterval` is synchronous; the begin/end pair is
     /// emitted around the awaited body so Instruments shows the full async
     /// duration including suspension time.
+    ///
+    /// Memory reads bracket the `await` synchronously: `memBefore` is read
+    /// before suspension; `memAfter` is read in the `defer` block after the
+    /// awaited body returns (or throws). This correctly accounts for GPU
+    /// allocations made inside the async body.
     public static func emitIntervalAsync<T>(
         name: StaticString,
         signposter: OSSignposter,
@@ -126,6 +161,10 @@ extension Telemetry {
         let state = signposter.beginInterval(name, id: id, "\(message)")
         let nameString = "\(name)"
         #if MLXAUDIO_TELEMETRY_FULL
+        // Capture MLX memory before the body when at .memory level or higher.
+        // `memBefore` is read synchronously before the first `await` so the
+        // baseline is correct even if the body suspends.
+        let memBefore: Int = (Telemetry.level >= .memory) ? MLX.Memory.activeMemory : 0
         Telemetry._intervalRecorder?.recordBegin(
             name: nameString,
             subsystem: subsystem,
@@ -140,6 +179,24 @@ extension Telemetry {
                 subsystem: subsystem,
                 message: message
             )
+            // Capture MLX memory after the body, emit before/after/delta as a
+            // signpost event so Instruments shows memory metadata on the interval,
+            // notify the test recorder (synchronously, no CounterStore race), and
+            // forward the delta to CounterStore for `TelemetrySnapshot.perOpDeltas`.
+            if Telemetry.level >= .memory {
+                let memAfter = MLX.Memory.activeMemory
+                let delta = memAfter - memBefore
+                signposter.emitEvent(
+                    name, id: id,
+                    "memory before:\(memBefore) after:\(memAfter) delta:\(delta)"
+                )
+                Telemetry._intervalRecorder?.recordMemoryDelta(
+                    name: nameString, before: memBefore, after: memAfter, delta: delta
+                )
+                Task.detached(priority: .background) {
+                    await CounterStore.shared.recordPerOpDelta(opName: nameString, delta: delta)
+                }
+            }
             #endif
         }
         return try await body()

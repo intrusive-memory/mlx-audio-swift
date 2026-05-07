@@ -56,6 +56,23 @@ internal actor CounterStore {
         liveCounts[className, default: 0] -= 1
     }
 
+    // MARK: - Per-op delta accumulation (WU-4 / S12)
+
+    /// Accumulate an MLX active-memory delta for the named operation interval.
+    ///
+    /// Called by `Telemetry.emitInterval` / `emitIntervalAsync` when
+    /// `Telemetry.level >= .memory`. The delta is the difference
+    /// `(MLX.Memory.activeMemory after closure) - (MLX.Memory.activeMemory before closure)`.
+    /// Positive values indicate memory growth; negative values indicate reclamation.
+    /// Values accumulate additively across calls so a leak shows as steady positive
+    /// growth over repeated calls. Zeroed by `reset()`.
+    ///
+    /// No-op when `Telemetry.level < .memory` or `.off` — the call sites gate
+    /// this via `Telemetry.level >= .memory` before calling.
+    func recordPerOpDelta(opName: String, delta: Int) {
+        perOpDeltas[opName, default: 0] += delta
+    }
+
     // MARK: - Queries
 
     /// Capture a `TelemetrySnapshot` reflecting current state.
@@ -74,6 +91,7 @@ internal actor CounterStore {
             liveCounts: liveCounts,
             mlxActiveBytes: active,
             mlxPeakBytes: mlxPeakBytes,
+            perOpDeltas: perOpDeltas,
             timestamp: Date()
         )
     }
@@ -100,5 +118,47 @@ internal actor CounterStore {
     /// the MLX memory read in tests that only care about counter balance.
     func _liveCountsForTesting() -> [String: Int] {
         liveCounts
+    }
+
+    /// Read raw `perOpDeltas` without going through `snapshot()` — used
+    /// by `TelemetryMemoryTests` to inspect accumulated deltas without
+    /// triggering an MLX memory read.
+    func _perOpDeltasForTesting() -> [String: Int] {
+        perOpDeltas
+    }
+
+    /// Zero only `perOpDeltas` without touching `liveCounts` or
+    /// `mlxPeakBytes`. Used by `TelemetryMemoryTests` so that delta tests
+    /// can start with a clean per-op slate without racing against
+    /// `TelemetryCounterStoreTests`'s lifecycle-counter assertions.
+    func _resetPerOpDeltasForTesting() {
+        perOpDeltas.removeAll(keepingCapacity: true)
+    }
+
+    /// Atomically apply a batch of per-op deltas (opName → delta) and
+    /// return the resulting values for each key after applying the batch.
+    ///
+    /// Used by `TelemetryMemoryTests` to accumulate multiple deltas in a
+    /// single actor message so no concurrent reset can interleave between
+    /// individual `recordPerOpDelta` calls during the test.
+    @discardableResult
+    func _batchRecordAndReadForTesting(_ entries: [(opName: String, delta: Int)]) -> [String: Int] {
+        for entry in entries {
+            perOpDeltas[entry.opName, default: 0] += entry.delta
+        }
+        return perOpDeltas
+    }
+
+    /// Atomically clear `perOpDeltas`, apply a batch of deltas, and return
+    /// the resulting per-op dict. Combines `_resetPerOpDeltasForTesting` and
+    /// `_batchRecordAndReadForTesting` into one actor turn so no concurrent
+    /// operation can interleave between the clear and the additions.
+    @discardableResult
+    func _clearAndBatchRecordForTesting(_ entries: [(opName: String, delta: Int)]) -> [String: Int] {
+        perOpDeltas.removeAll(keepingCapacity: true)
+        for entry in entries {
+            perOpDeltas[entry.opName, default: 0] += entry.delta
+        }
+        return perOpDeltas
     }
 }
