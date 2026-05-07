@@ -34,6 +34,26 @@ internal protocol TelemetryIntervalRecorder: AnyObject, Sendable {
 extension TelemetryIntervalRecorder {
     func recordMemoryDelta(name: String, before: Int, after: Int, delta: Int) {}
 }
+
+/// Test-only protocol for capturing per-token point-event signposts.
+///
+/// Production code emits per-token events (Level 4 = `.verbose`) via
+/// `Telemetry.emitEvent(family:name:tokenIndex:)`. Those helpers always call
+/// through to the real `OSSignposter.emitEvent(...)` so Instruments traces are
+/// recorded as usual; in addition, when a `TelemetryEventRecorder` is installed
+/// via `Telemetry._installEventRecorder(_:)`, every point event is also forwarded
+/// to the recorder.
+///
+/// Tests use this seam to assert "N per-token events fired for N requested tokens"
+/// without depending on out-of-process signpost capture (Instruments / xctrace).
+///
+/// Conformance is internal to MLXAudioCore + the test target. Host apps must not
+/// adopt this protocol — the entire seam is gated under `MLXAUDIO_TELEMETRY_FULL`,
+/// so it disappears in release builds.
+internal protocol TelemetryEventRecorder: AnyObject, Sendable {
+    /// Called once per point event from `Telemetry.emitEvent(...)`.
+    func recordEvent(family: String, name: String, tokenIndex: Int)
+}
 #endif
 
 extension Telemetry {
@@ -331,5 +351,65 @@ extension Telemetry {
         _levelOverride = level
         return prev
     }
+
+    // MARK: - Per-token event recorder seam (S13 — Level 4 = .verbose)
+
+    /// Test-only injection point for per-token point events. Production code
+    /// reads this through `emitEvent(family:name:tokenIndex:)`; only test code
+    /// installs / uninstalls it.
+    ///
+    /// Marked `nonisolated(unsafe)` because it is only mutated from the
+    /// suite-serialised test setup/teardown path; production reads are
+    /// idempotent nil-checks.
+    nonisolated(unsafe) internal static var _eventRecorder: TelemetryEventRecorder?
+
+    /// Install an event recorder. Returns the previous recorder so tests can
+    /// restore on teardown.
+    @discardableResult
+    internal static func _installEventRecorder(
+        _ recorder: TelemetryEventRecorder?
+    ) -> TelemetryEventRecorder? {
+        let previous = _eventRecorder
+        _eventRecorder = recorder
+        return previous
+    }
     #endif
+
+    // MARK: - emitEvent helper (S13 — per-token point signposts at Level 4)
+
+    /// Emit a single per-token (point) signpost on the given family's signposter.
+    ///
+    /// **Call-site gating (CRITICAL — both gates required)**:
+    /// ```swift
+    /// #if MLXAUDIO_TELEMETRY_FULL
+    /// if Telemetry.level >= .verbose {
+    ///     Telemetry.emitEvent(family: .qwen3TTS, name: "Qwen3TTS.token", tokenIndex: step)
+    /// }
+    /// #endif
+    /// ```
+    ///
+    /// The two-layer gate mirrors the `.operations` interval pattern: the release
+    /// ceiling is `.lifecycle`, so the `#if` block strips completely in release
+    /// builds. The runtime `if level >= .verbose` guard prevents per-token overhead
+    /// when telemetry is enabled at a lower level (e.g. `.operations`).
+    ///
+    /// When a `TelemetryEventRecorder` is installed (test-only seam), the recorder
+    /// also receives a notification so tests can assert "N events fired for N tokens"
+    /// without out-of-process Instruments capture.
+    public static func emitEvent(
+        family: Family,
+        name: StaticString,
+        tokenIndex: Int
+    ) {
+        let sp = family.signposter
+        let id = sp.makeSignpostID()
+        sp.emitEvent(name, id: id, "token:\(tokenIndex)")
+        #if MLXAUDIO_TELEMETRY_FULL
+        _eventRecorder?.recordEvent(
+            family: family.rawValue,
+            name: "\(name)",
+            tokenIndex: tokenIndex
+        )
+        #endif
+    }
 }

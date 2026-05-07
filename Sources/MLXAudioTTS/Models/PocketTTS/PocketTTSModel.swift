@@ -281,6 +281,13 @@ public final class PocketTTSModel: Module, SpeechGenerationModel, @unchecked Sen
             let audioChunk = mimi.decodeStep(quantized)
             outputs.append(audioChunk.squeezed())
             backboneInput = nextLatent
+
+            // S13: per-token signpost (Level 4 = .verbose). Strips in release builds.
+            #if MLXAUDIO_TELEMETRY_FULL
+            if Telemetry.level >= .verbose {
+                Telemetry.emitEvent(family: .pocketTTS, name: "PocketTTS.token", tokenIndex: step)
+            }
+            #endif
         }
 
         return outputs

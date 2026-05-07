@@ -1004,6 +1004,7 @@ public class Qwen3ASRModel: Module {
         eval(logits)
 
         var generatedTokens: [Int] = []
+        var qwen3TokenStep = 0
 
         for _ in 0..<maxTokens {
             var lastLogits = logits[0..., -1, 0...]
@@ -1017,6 +1018,14 @@ public class Qwen3ASRModel: Module {
             }
 
             generatedTokens.append(nextToken)
+
+            // S13: per-token signpost (Level 4 = .verbose). Strips in release builds.
+            #if MLXAUDIO_TELEMETRY_FULL
+            if Telemetry.level >= .verbose {
+                Telemetry.emitEvent(family: .qwen3ASR, name: "Qwen3ASR.token", tokenIndex: qwen3TokenStep)
+            }
+            #endif
+            qwen3TokenStep += 1
 
             let nextTokenArray = MLXArray([Int32(nextToken)]).expandedDimensions(axis: 0)
             logits = callAsFunction(inputIds: nextTokenArray, cache: cache)
@@ -1063,6 +1072,7 @@ public class Qwen3ASRModel: Module {
         eval(logits)
 
         var generatedTokens: [Int] = []
+        var qwen3ChunkTokenStep = 0
 
         for _ in 0..<maxTokens {
             var lastLogits = logits[0..., -1, 0...]
@@ -1076,6 +1086,14 @@ public class Qwen3ASRModel: Module {
             }
 
             generatedTokens.append(nextToken)
+
+            // S13: per-token signpost (Level 4 = .verbose). Strips in release builds.
+            #if MLXAUDIO_TELEMETRY_FULL
+            if Telemetry.level >= .verbose {
+                Telemetry.emitEvent(family: .qwen3ASR, name: "Qwen3ASR.token", tokenIndex: qwen3ChunkTokenStep)
+            }
+            #endif
+            qwen3ChunkTokenStep += 1
 
             let nextTokenArray = MLXArray([Int32(nextToken)]).expandedDimensions(axis: 0)
             logits = callAsFunction(inputIds: nextTokenArray, cache: cache)

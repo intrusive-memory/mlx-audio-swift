@@ -756,6 +756,13 @@ public class LlamaTTSModel: Module, KVCacheDimensionProvider, SpeechGenerationMo
 
             generatedTokens.append(Int32(tokenValue))
 
+            // S13: per-token signpost (Level 4 = .verbose). Strips in release builds.
+            #if MLXAUDIO_TELEMETRY_FULL
+            if Telemetry.level >= .verbose {
+                Telemetry.emitEvent(family: .llamaTTS, name: "LlamaTTS.token", tokenIndex: i)
+            }
+            #endif
+
             // Periodically clear GPU cache
             if i % 50 == 0 {
                 Memory.clearCache()

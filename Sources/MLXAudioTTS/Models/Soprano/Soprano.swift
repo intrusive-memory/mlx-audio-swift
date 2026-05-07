@@ -828,6 +828,7 @@ public class SopranoModel: Module, KVCacheDimensionProvider, SpeechGenerationMod
 
                 // Generate tokens
                 var currentLogits = logits
+                var sopranoTokenStep = 0
 
                 for _ in 0..<maxTokens {
                     // Get last logits
@@ -874,6 +875,14 @@ public class SopranoModel: Module, KVCacheDimensionProvider, SpeechGenerationMod
                     continuation.yield((tokenId, newLastHiddenState))
 
                     currentLogits = newLogits
+
+                    // S13: per-token signpost (Level 4 = .verbose). Strips in release builds.
+                    #if MLXAUDIO_TELEMETRY_FULL
+                    if Telemetry.level >= .verbose {
+                        Telemetry.emitEvent(family: .sopranoTTS, name: "SopranoTTS.token", tokenIndex: sopranoTokenStep)
+                    }
+                    #endif
+                    sopranoTokenStep += 1
                 }
 
                 continuation.finish()

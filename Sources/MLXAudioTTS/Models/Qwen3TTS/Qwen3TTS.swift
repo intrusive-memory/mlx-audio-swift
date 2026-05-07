@@ -899,6 +899,13 @@ public final class Qwen3TTSModel: Module, SpeechGenerationModel, @unchecked Send
             if step > 0 && step % 50 == 0 {
                 Memory.clearCache()
             }
+
+            // S13: per-token signpost (Level 4 = .verbose). Strips in release builds.
+            #if MLXAUDIO_TELEMETRY_FULL
+            if Telemetry.level >= .verbose {
+                Telemetry.emitEvent(family: .qwen3TTS, name: "Qwen3TTS.token", tokenIndex: step)
+            }
+            #endif
         }
 
         return generatedCodes

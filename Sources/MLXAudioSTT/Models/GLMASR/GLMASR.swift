@@ -419,6 +419,7 @@ public class GLMASRModel: Module {
 
         // Generate tokens
         var generatedTokens: [Int] = []
+        var glmTokenStep = 0
 
         for _ in 0..<maxTokens {
             let nextToken = ctx.sampleNextToken(temperature: temperature)
@@ -432,6 +433,14 @@ public class GLMASRModel: Module {
             if verbose {
                 print(ctx.decode(nextToken), terminator: "")
             }
+
+            // S13: per-token signpost (Level 4 = .verbose). Strips in release builds.
+            #if MLXAUDIO_TELEMETRY_FULL
+            if Telemetry.level >= .verbose {
+                Telemetry.emitEvent(family: .glmASR, name: "GLMASR.token", tokenIndex: glmTokenStep)
+            }
+            #endif
+            glmTokenStep += 1
 
             // Step to next token
             ctx = stepGeneration(context: ctx, nextToken: nextToken)
@@ -484,21 +493,30 @@ public class GLMASRModel: Module {
                 
                 let generateStartTime = Date()
                 var generatedTokens: [Int] = []
-                
+                var glmStreamTokenStep = 0
+
                 // Generate tokens
                 for _ in 0..<maxTokens {
                     let nextToken = ctx.sampleNextToken(temperature: temperature)
-                    
+
                     if ctx.isEOS(nextToken) {
                         break
                     }
-                    
+
                     generatedTokens.append(nextToken)
-                    
+
                     // Emit token
                     let tokenText = ctx.decode(nextToken)
                     continuation.yield(.token(tokenText))
-                    
+
+                    // S13: per-token signpost (Level 4 = .verbose). Strips in release builds.
+                    #if MLXAUDIO_TELEMETRY_FULL
+                    if Telemetry.level >= .verbose {
+                        Telemetry.emitEvent(family: .glmASR, name: "GLMASR.token", tokenIndex: glmStreamTokenStep)
+                    }
+                    #endif
+                    glmStreamTokenStep += 1
+
                     // Step to next token
                     ctx = self.stepGeneration(context: ctx, nextToken: nextToken)
                 }
