@@ -35,6 +35,7 @@ public final class PocketTTSModel: Module, SpeechGenerationModel, @unchecked Sen
         self._mimi = ModuleInfo(wrappedValue: mimi)
         self.speaker_proj_weight = MLXArray.zeros([config.flowLM.transformer.dModel, config.mimi.quantizer.outputDimension])
         super.init()
+        Telemetry.trackLifecycle(self, className: "PocketTTS.Model")
     }
 
     /// Testing-only init: constructs a PocketTTSModel with pre-built sub-models,
@@ -47,6 +48,11 @@ public final class PocketTTSModel: Module, SpeechGenerationModel, @unchecked Sen
         self._mimi = ModuleInfo(wrappedValue: mimi)
         self.speaker_proj_weight = MLXArray.zeros([config.flowLM.transformer.dModel, config.mimi.quantizer.outputDimension])
         super.init()
+        Telemetry.trackLifecycle(self, className: "PocketTTS.Model")
+    }
+
+    deinit {
+        Telemetry.trackLifecycleEnd(className: "PocketTTS.Model")
     }
 
     public static func fromConfig(_ config: PocketTTSModelConfig, modelFolder: URL) async throws -> PocketTTSModel {
@@ -275,6 +281,13 @@ public final class PocketTTSModel: Module, SpeechGenerationModel, @unchecked Sen
             let audioChunk = mimi.decodeStep(quantized)
             outputs.append(audioChunk.squeezed())
             backboneInput = nextLatent
+
+            // S13: per-token signpost (Level 4 = .verbose). Strips in release builds.
+            #if MLXAUDIO_TELEMETRY_FULL
+            if Telemetry.level >= .verbose {
+                Telemetry.emitEvent(family: .pocketTTS, name: "PocketTTS.token", tokenIndex: step)
+            }
+            #endif
         }
 
         return outputs
@@ -288,6 +301,38 @@ public final class PocketTTSModel: Module, SpeechGenerationModel, @unchecked Sen
         refAudio: MLXArray? = nil,
         refText: String? = nil,
         language: String? = nil,
+        instruct: String?,
+        generationParameters: GenerateParameters
+    ) async throws -> MLXArray {
+        // S11: PocketTTS.generate interval (Level 2 = .operations).
+        #if MLXAUDIO_TELEMETRY_FULL
+        if Telemetry.level >= .operations {
+            return try await Telemetry.emitIntervalAsync(
+                name: "PocketTTS.generate",
+                family: .pocketTTS,
+                message: text.prefix(64).description
+            ) {
+                try await self._generateImpl(
+                    text: text, voice: voice, refAudio: refAudio, refText: refText,
+                    language: language, instruct: instruct,
+                    generationParameters: generationParameters
+                )
+            }
+        }
+        #endif
+        return try await _generateImpl(
+            text: text, voice: voice, refAudio: refAudio, refText: refText,
+            language: language, instruct: instruct,
+            generationParameters: generationParameters
+        )
+    }
+
+    private func _generateImpl(
+        text: String,
+        voice: String?,
+        refAudio: MLXArray?,
+        refText: String?,
+        language: String?,
         instruct: String?,
         generationParameters: GenerateParameters
     ) async throws -> MLXArray {
@@ -411,7 +456,22 @@ public final class PocketTTSModel: Module, SpeechGenerationModel, @unchecked Sen
                 flowLM: try FlowLMModel.fromConfigSync(config.flowLM, latentDim: config.mimi.quantizer.dimension, modelFolder: modelDir),
                 mimi: MimiAdapter.fromConfig(config.mimi)
             )
+            // S10: PocketTTS loadWeights interval (Level 2 = .operations).
+            #if MLXAUDIO_TELEMETRY_FULL
+            if Telemetry.level >= .operations {
+                try Telemetry.emitInterval(
+                    name: "PocketTTS.loadWeights",
+                    family: .pocketTTS,
+                    message: "pocket-tts"
+                ) {
+                    try model.update(parameters: ModuleParameters.unflattened(weights), verify: [.all])
+                }
+            } else {
+                try model.update(parameters: ModuleParameters.unflattened(weights), verify: [.all])
+            }
+            #else
             try model.update(parameters: ModuleParameters.unflattened(weights), verify: [.all])
+            #endif
             eval(model)
             return model
         }

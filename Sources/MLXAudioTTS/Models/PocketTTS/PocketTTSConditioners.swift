@@ -1,6 +1,7 @@
 import Foundation
 @preconcurrency import MLX
 import MLXNN
+import MLXAudioCore
 public struct TokenizedText {
     public let tokens: MLXArray
 }
@@ -20,6 +21,7 @@ public final class SentencePieceTokenizer {
         }
         let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] ?? [:]
         self.tokenizer = try UnigramTokenizer(tokenizerJSON: json)
+        Telemetry.trackLifecycle(self, className: "PocketTTS.Tokenizer")
     }
 
     /// Testing-only init: constructs a SentencePieceTokenizer with a minimal single-entry
@@ -34,6 +36,7 @@ public final class SentencePieceTokenizer {
         ]
         // Force-try: the hardcoded JSON above is always valid.
         self.tokenizer = try! UnigramTokenizer(tokenizerJSON: stubJSON)
+        Telemetry.trackLifecycle(self, className: "PocketTTS.Tokenizer")
     }
 
     /// Synchronous variant — no actual async work; used inside `loadWithAcervoStrict` closure.
@@ -49,6 +52,11 @@ public final class SentencePieceTokenizer {
         }
         let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] ?? [:]
         self.tokenizer = try UnigramTokenizer(tokenizerJSON: json)
+        Telemetry.trackLifecycle(self, className: "PocketTTS.Tokenizer")
+    }
+
+    deinit {
+        Telemetry.trackLifecycleEnd(className: "PocketTTS.Tokenizer")
     }
 
     public func callAsFunction(_ text: String) -> TokenizedText {

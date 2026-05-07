@@ -374,6 +374,12 @@ public class LlamaTTSModel: Module, KVCacheDimensionProvider, SpeechGenerationMo
         if !args.tieWordEmbeddings {
             self._lmHead.wrappedValue = Linear(args.hiddenSize, args.vocabularySize, bias: false)
         }
+        super.init()
+        Telemetry.trackLifecycle(self, className: "LlamaTTS.Model")
+    }
+
+    deinit {
+        Telemetry.trackLifecycleEnd(className: "LlamaTTS.Model")
     }
 
     // MARK: - Parse Output
@@ -592,7 +598,9 @@ public class LlamaTTSModel: Module, KVCacheDimensionProvider, SpeechGenerationMo
 
     public func makeCache() -> [KVCache] {
         return (0..<configuration.hiddenLayers).map { _ in
-            KVCacheSimple()
+            let cache = KVCacheSimple()
+            attachKVCacheLifecycle(family: "LlamaTTS", to: cache)
+            return cache
         }
     }
 
@@ -605,7 +613,26 @@ public class LlamaTTSModel: Module, KVCacheDimensionProvider, SpeechGenerationMo
         instruct _: String?,
         generationParameters: GenerateParameters
     ) async throws -> MLXArray {
-        try await generate(
+        // S11: LlamaTTS.generate interval (Level 2 = .operations).
+        #if MLXAUDIO_TELEMETRY_FULL
+        if Telemetry.level >= .operations {
+            return try await Telemetry.emitIntervalAsync(
+                name: "LlamaTTS.generate",
+                family: .llamaTTS,
+                message: text.prefix(64).description
+            ) {
+                try await self.generate(
+                    text: text,
+                    voice: voice,
+                    refAudio: refAudio,
+                    refText: refText,
+                    cache: nil,
+                    parameters: generationParameters
+                )
+            }
+        }
+        #endif
+        return try await generate(
             text: text,
             voice: voice,
             refAudio: refAudio,
@@ -728,6 +755,13 @@ public class LlamaTTSModel: Module, KVCacheDimensionProvider, SpeechGenerationMo
             }
 
             generatedTokens.append(Int32(tokenValue))
+
+            // S13: per-token signpost (Level 4 = .verbose). Strips in release builds.
+            #if MLXAUDIO_TELEMETRY_FULL
+            if Telemetry.level >= .verbose {
+                Telemetry.emitEvent(family: .llamaTTS, name: "LlamaTTS.token", tokenIndex: i)
+            }
+            #endif
 
             // Periodically clear GPU cache
             if i % 50 == 0 {
@@ -935,7 +969,22 @@ public class LlamaTTSModel: Module, KVCacheDimensionProvider, SpeechGenerationMo
                 }
             }
 
+            // S10: LlamaTTS loadWeights interval (Level 2 = .operations).
+            #if MLXAUDIO_TELEMETRY_FULL
+            if Telemetry.level >= .operations {
+                try Telemetry.emitInterval(
+                    name: "LlamaTTS.loadWeights",
+                    family: .llamaTTS,
+                    message: "orpheus-tts-3b"
+                ) {
+                    try model.update(parameters: ModuleParameters.unflattened(sanitizedWeights), verify: [.all])
+                }
+            } else {
+                try model.update(parameters: ModuleParameters.unflattened(sanitizedWeights), verify: [.all])
+            }
+            #else
             try model.update(parameters: ModuleParameters.unflattened(sanitizedWeights), verify: [.all])
+            #endif
             eval(model)
 
             return (model, modelDir)

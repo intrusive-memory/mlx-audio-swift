@@ -167,6 +167,83 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             2>&1 | tee test-weight-roundtrip-output.log
 
+      - name: Leak detection - Qwen3TTS (local-only)
+        env:
+          MLXAUDIO_NIGHTLY_RUN: "1"
+        run: |
+          xcodebuild test-without-building \
+            -scheme MLXAudio-Package \
+            -destination 'platform=macOS,arch=arm64' \
+            -only-testing:MLXAudioTests/TelemetryLeakDetectionQwen3TTSTests \
+            CODE_SIGNING_ALLOWED=NO \
+            2>&1 | tee test-leak-qwen3tts-output.log
+
+      - name: Leak detection - LlamaTTS (local-only)
+        env:
+          MLXAUDIO_NIGHTLY_RUN: "1"
+        run: |
+          xcodebuild test-without-building \
+            -scheme MLXAudio-Package \
+            -destination 'platform=macOS,arch=arm64' \
+            -only-testing:MLXAudioTests/TelemetryLeakDetectionLlamaTTSTests \
+            CODE_SIGNING_ALLOWED=NO \
+            2>&1 | tee test-leak-llamatts-output.log
+
+      - name: Leak detection - SopranoTTS (local-only)
+        env:
+          MLXAUDIO_NIGHTLY_RUN: "1"
+        run: |
+          xcodebuild test-without-building \
+            -scheme MLXAudio-Package \
+            -destination 'platform=macOS,arch=arm64' \
+            -only-testing:MLXAudioTests/TelemetryLeakDetectionSopranoTTSTests \
+            CODE_SIGNING_ALLOWED=NO \
+            2>&1 | tee test-leak-soprano-output.log
+
+      - name: Leak detection - PocketTTS (local-only)
+        env:
+          MLXAUDIO_NIGHTLY_RUN: "1"
+        run: |
+          xcodebuild test-without-building \
+            -scheme MLXAudio-Package \
+            -destination 'platform=macOS,arch=arm64' \
+            -only-testing:MLXAudioTests/TelemetryLeakDetectionPocketTTSTests \
+            CODE_SIGNING_ALLOWED=NO \
+            2>&1 | tee test-leak-pockettts-output.log
+
+      - name: Leak detection - MarvisTTS (local-only)
+        env:
+          MLXAUDIO_NIGHTLY_RUN: "1"
+        run: |
+          xcodebuild test-without-building \
+            -scheme MLXAudio-Package \
+            -destination 'platform=macOS,arch=arm64' \
+            -only-testing:MLXAudioTests/TelemetryLeakDetectionMarvisTTSTests \
+            CODE_SIGNING_ALLOWED=NO \
+            2>&1 | tee test-leak-marvis-output.log
+
+      - name: Leak detection - Qwen3ASR (local-only)
+        env:
+          MLXAUDIO_NIGHTLY_RUN: "1"
+        run: |
+          xcodebuild test-without-building \
+            -scheme MLXAudio-Package \
+            -destination 'platform=macOS,arch=arm64' \
+            -only-testing:MLXAudioTests/TelemetryLeakDetectionQwen3ASRTests \
+            CODE_SIGNING_ALLOWED=NO \
+            2>&1 | tee test-leak-qwen3asr-output.log
+
+      - name: Leak detection - GLMASR (local-only)
+        env:
+          MLXAUDIO_NIGHTLY_RUN: "1"
+        run: |
+          xcodebuild test-without-building \
+            -scheme MLXAudio-Package \
+            -destination 'platform=macOS,arch=arm64' \
+            -only-testing:MLXAudioTests/TelemetryLeakDetectionGLMASRTests \
+            CODE_SIGNING_ALLOWED=NO \
+            2>&1 | tee test-leak-glmasr-output.log
+
       - name: Upload nightly test output
         if: always()
         uses: actions/upload-artifact@v7
@@ -187,4 +264,11 @@ jobs:
             test-deterministic-output.log
             test-kvcache-output.log
             test-weight-roundtrip-output.log
+            test-leak-qwen3tts-output.log
+            test-leak-llamatts-output.log
+            test-leak-soprano-output.log
+            test-leak-pockettts-output.log
+            test-leak-marvis-output.log
+            test-leak-qwen3asr-output.log
+            test-leak-glmasr-output.log
           retention-days: 14

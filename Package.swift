@@ -69,7 +69,8 @@ let package = Package(
             ],
             path: "Sources/MLXAudioCore",
             swiftSettings: [
-                .unsafeFlags(["-Xfrontend", "-warn-concurrency"], .when(configuration: .debug))
+                .unsafeFlags(["-Xfrontend", "-warn-concurrency"], .when(configuration: .debug)),
+                .define("MLXAUDIO_TELEMETRY_FULL", .when(configuration: .debug)),
             ]
         ),
 
@@ -91,7 +92,10 @@ let package = Package(
                 .product(name: "Crypto", package: "swift-crypto"),
                 .product(name: "yyjson", package: "yyjson"),
             ],
-            path: "Sources/MLXAudioCodecs"
+            path: "Sources/MLXAudioCodecs",
+            swiftSettings: [
+                .define("MLXAUDIO_TELEMETRY_FULL", .when(configuration: .debug)),
+            ]
         ),
 
         // MARK: - MLXAudioTTS
@@ -114,7 +118,10 @@ let package = Package(
                 .product(name: "OrderedCollections", package: "swift-collections"),
                 .product(name: "Crypto", package: "swift-crypto"),
             ],
-            path: "Sources/MLXAudioTTS"
+            path: "Sources/MLXAudioTTS",
+            swiftSettings: [
+                .define("MLXAUDIO_TELEMETRY_FULL", .when(configuration: .debug)),
+            ]
         ),
 
         // MARK: - MLXAudioSTT
@@ -137,7 +144,10 @@ let package = Package(
                 .product(name: "OrderedCollections", package: "swift-collections"),
                 .product(name: "Crypto", package: "swift-crypto"),
             ],
-            path: "Sources/MLXAudioSTT"
+            path: "Sources/MLXAudioSTT",
+            swiftSettings: [
+                .define("MLXAUDIO_TELEMETRY_FULL", .when(configuration: .debug)),
+            ]
         ),
 
         // MARK: - MLXAudioSTS
@@ -182,6 +192,9 @@ let package = Package(
             path: "Tests",
             resources: [
                 .copy("media")
+            ],
+            swiftSettings: [
+                .define("MLXAUDIO_TELEMETRY_FULL", .when(configuration: .debug)),
             ]
         ),
     ]

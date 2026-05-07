@@ -220,6 +220,12 @@ public class SopranoModel: Module, KVCacheDimensionProvider, SpeechGenerationMod
         if !config.tieWordEmbeddings {
             self._lmHead.wrappedValue = Linear(config.hiddenSize, config.vocabularySize, bias: false)
         }
+        super.init()
+        Telemetry.trackLifecycle(self, className: "SopranoTTS.Model")
+    }
+
+    deinit {
+        Telemetry.trackLifecycleEnd(className: "SopranoTTS.Model")
     }
 
     public var sampleRate: Int {
@@ -264,7 +270,9 @@ public class SopranoModel: Module, KVCacheDimensionProvider, SpeechGenerationMod
 
     public func makeCache() -> [KVCache] {
         return (0..<configuration.hiddenLayers).map { _ in
-            KVCacheSimple()
+            let cache = KVCacheSimple()
+            attachKVCacheLifecycle(family: "SopranoTTS", to: cache)
+            return cache
         }
     }
 
@@ -277,7 +285,24 @@ public class SopranoModel: Module, KVCacheDimensionProvider, SpeechGenerationMod
         instruct _: String?,
         generationParameters: GenerateParameters
     ) async throws -> MLXArray {
-        try await generate(
+        // S11: SopranoTTS.generate interval (Level 2 = .operations).
+        #if MLXAUDIO_TELEMETRY_FULL
+        if Telemetry.level >= .operations {
+            return try await Telemetry.emitIntervalAsync(
+                name: "SopranoTTS.generate",
+                family: .sopranoTTS,
+                message: text.prefix(64).description
+            ) {
+                try await self.generate(
+                    text: text,
+                    voice: voice,
+                    splitPattern: "\n",
+                    parameters: generationParameters
+                )
+            }
+        }
+        #endif
+        return try await generate(
             text: text,
             voice: voice,
             splitPattern: "\n",
@@ -803,6 +828,7 @@ public class SopranoModel: Module, KVCacheDimensionProvider, SpeechGenerationMod
 
                 // Generate tokens
                 var currentLogits = logits
+                var sopranoTokenStep = 0
 
                 for _ in 0..<maxTokens {
                     // Get last logits
@@ -849,6 +875,14 @@ public class SopranoModel: Module, KVCacheDimensionProvider, SpeechGenerationMod
                     continuation.yield((tokenId, newLastHiddenState))
 
                     currentLogits = newLogits
+
+                    // S13: per-token signpost (Level 4 = .verbose). Strips in release builds.
+                    #if MLXAUDIO_TELEMETRY_FULL
+                    if Telemetry.level >= .verbose {
+                        Telemetry.emitEvent(family: .sopranoTTS, name: "SopranoTTS.token", tokenIndex: sopranoTokenStep)
+                    }
+                    #endif
+                    sopranoTokenStep += 1
                 }
 
                 continuation.finish()
@@ -895,7 +929,22 @@ public class SopranoModel: Module, KVCacheDimensionProvider, SpeechGenerationMod
                 }
             }
 
+            // S10: SopranoTTS loadWeights interval (Level 2 = .operations).
+            #if MLXAUDIO_TELEMETRY_FULL
+            if Telemetry.level >= .operations {
+                try Telemetry.emitInterval(
+                    name: "SopranoTTS.loadWeights",
+                    family: .sopranoTTS,
+                    message: "soprano-tts-80m"
+                ) {
+                    try model.update(parameters: ModuleParameters.unflattened(sanitizedWeights), verify: [.all])
+                }
+            } else {
+                try model.update(parameters: ModuleParameters.unflattened(sanitizedWeights), verify: [.all])
+            }
+            #else
             try model.update(parameters: ModuleParameters.unflattened(sanitizedWeights), verify: [.all])
+            #endif
             eval(model)
 
             return (model, modelDir)

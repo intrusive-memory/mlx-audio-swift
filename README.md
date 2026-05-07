@@ -262,6 +262,83 @@ let audio1 = try model.generateWithClonePrompt(text: "First sentence", cloneProm
 let audio2 = try model.generateWithClonePrompt(text: "Second sentence", clonePrompt: clonePrompt)
 ```
 
+## Telemetry
+
+`MLXAudio` ships an in-process telemetry surface for finding memory leaks and
+profiling generation hot paths. It is opt-in: the production ceiling is
+`.lifecycle` and the env var defaults to `.lifecycle`.
+
+### Levels
+
+- `.off` — no instrumentation
+- `.lifecycle` — paired init/deinit counters on every long-lived object (default)
+- `.operations` — Level 1 + interval signposts on resolve / download / load /
+  generate / encode / decode (requires debug build)
+- `.memory` — Level 2 + MLX active-memory deltas attached to every interval
+- `.verbose` — Level 3 + per-token / per-codec-step / KV-grow point events
+
+### Compile flag
+
+`MLXAUDIO_TELEMETRY_FULL` is defined in `.debug` builds (via `Package.swift`).
+Levels above `.lifecycle` strip out at compile time in release builds — they
+cannot ship in production regardless of env-var settings.
+
+### Env var
+
+Set `MLXAUDIO_TELEMETRY` to one of `off|lifecycle|operations|memory|verbose`
+(case-insensitive) to override the default level at runtime. If the requested
+level exceeds the compiled ceiling, the library clamps to the ceiling and emits
+a one-shot warning on the `MLXAudio.Telemetry` os.Logger subsystem.
+
+### Leak-detection example
+
+```swift
+func testQwen3TTSDoesNotLeak() async throws {
+    // 1. Reset counters to a known state.
+    await Telemetry.resetCounters()
+
+    // 2. Baseline snapshot BEFORE the allocation loop.
+    let before = await Telemetry.snapshot()
+
+    // 3. Allocate and drop N times inside autoreleasepool.
+    for _ in 0..<10 {
+        autoreleasepool {
+            let model = Qwen3TTSModel(config: someConfig)
+            _ = model
+        }
+    }
+
+    // 4. Drain fire-and-forget background tasks before asserting.
+    var after = await Telemetry.snapshot()
+    for _ in 0..<200 {
+        if (after.liveCounts["Qwen3TTS.Model"] ?? 0)
+            == before.liveCounts["Qwen3TTS.Model", default: 0] { break }
+        try? await Task.sleep(nanoseconds: 1_000_000)
+        after = await Telemetry.snapshot()
+    }
+
+    // 5. Assert delta is zero.
+    XCTAssertEqual(
+        after.liveCounts["Qwen3TTS.Model", default: 0],
+        before.liveCounts["Qwen3TTS.Model", default: 0],
+        "Qwen3TTSModel instances leaked across 10 iterations"
+    )
+}
+```
+
+For per-op memory pinpointing, run the same test under
+`MLXAUDIO_TELEMETRY=memory` to populate `snapshot().perOpDeltas`. For visual
+inspection, run under Instruments with the os_signpost track and filter on
+subsystems prefixed with `MLXAudio.` (10 subsystems, one per model family).
+
+### Further reading
+
+See [`docs/TELEMETRY_USAGE.md`](docs/TELEMETRY_USAGE.md) for full walkthroughs:
+leak detection (Level 1), per-op memory pinpointing (Level 3), and Instruments
+trace capture (Level 2) including manual os_signpost track configuration.
+
+---
+
 ## Requirements
 
 - **macOS 26+** or **iOS 26+**

@@ -180,6 +180,12 @@ public class Encodec: Module {
         self._encoder.wrappedValue = EncodecEncoder(config: config)
         self._decoder.wrappedValue = EncodecDecoder(config: config)
         self._quantizer.wrappedValue = EncodecResidualVectorQuantizer(config: config)
+        super.init()
+        Telemetry.trackLifecycle(self, className: "Encodec.Model")
+    }
+
+    deinit {
+        Telemetry.trackLifecycleEnd(className: "Encodec.Model")
     }
 
     // MARK: - Properties
@@ -248,6 +254,22 @@ public class Encodec: Module {
         _ inputValues: MLXArray,
         paddingMask: MLXArray? = nil,
         bandwidth: Float? = nil
+    ) -> (MLXArray, [MLXArray?]) {
+        // S11: Encodec.encode interval (Level 2 = .operations).
+        #if MLXAUDIO_TELEMETRY_FULL
+        if Telemetry.level >= .operations {
+            return Telemetry.emitInterval(name: "Encodec.encode", family: .codecs) {
+                self._encodecEncodeImpl(inputValues, paddingMask: paddingMask, bandwidth: bandwidth)
+            }
+        }
+        #endif
+        return _encodecEncodeImpl(inputValues, paddingMask: paddingMask, bandwidth: bandwidth)
+    }
+
+    private func _encodecEncodeImpl(
+        _ inputValues: MLXArray,
+        paddingMask: MLXArray?,
+        bandwidth: Float?
     ) -> (MLXArray, [MLXArray?]) {
         let bw = bandwidth ?? config.targetBandwidths[0]
 
@@ -367,6 +389,22 @@ public class Encodec: Module {
         _ audioScales: [MLXArray?],
         paddingMask: MLXArray? = nil
     ) -> MLXArray {
+        // S11: Encodec.decode interval (Level 2 = .operations).
+        #if MLXAUDIO_TELEMETRY_FULL
+        if Telemetry.level >= .operations {
+            return Telemetry.emitInterval(name: "Encodec.decode", family: .codecs) {
+                self._encodecDecodeImpl(audioCodes, audioScales, paddingMask: paddingMask)
+            }
+        }
+        #endif
+        return _encodecDecodeImpl(audioCodes, audioScales, paddingMask: paddingMask)
+    }
+
+    private func _encodecDecodeImpl(
+        _ audioCodes: MLXArray,
+        _ audioScales: [MLXArray?],
+        paddingMask: MLXArray?
+    ) -> MLXArray {
         var audioValues: MLXArray
 
         if chunkLength == nil {
@@ -429,7 +467,24 @@ public class Encodec: Module {
             // Load weights
             let weightsURL = modelURL.appendingPathComponent("model.safetensors")
             let weights = try loadArrays(url: weightsURL)
+            // S10: Encodec loadWeights interval (Level 2 = .operations). Vocos
+            // composes Encodec for its feature extractor, so the Vocos
+            // load path's weight load is captured here too.
+            #if MLXAUDIO_TELEMETRY_FULL
+            if Telemetry.level >= .operations {
+                try Telemetry.emitInterval(
+                    name: "Encodec.loadWeights",
+                    family: .codecs,
+                    message: componentId
+                ) {
+                    try model.update(parameters: ModuleParameters.unflattened(weights), verify: .noUnusedKeys)
+                }
+            } else {
+                try model.update(parameters: ModuleParameters.unflattened(weights), verify: .noUnusedKeys)
+            }
+            #else
             try model.update(parameters: ModuleParameters.unflattened(weights), verify: .noUnusedKeys)
+            #endif
 
             return model
         }

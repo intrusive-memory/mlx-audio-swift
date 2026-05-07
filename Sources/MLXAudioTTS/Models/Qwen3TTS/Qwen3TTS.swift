@@ -37,6 +37,12 @@ public final class Qwen3TTSModel: Module, SpeechGenerationModel, @unchecked Send
         }()
         self.config = config
         self.talker = Qwen3TTSTalkerForConditionalGeneration(config: talkerConfig)
+        super.init()
+        Telemetry.trackLifecycle(self, className: "Qwen3TTS.Model")
+    }
+
+    deinit {
+        Telemetry.trackLifecycleEnd(className: "Qwen3TTS.Model")
     }
 
     // MARK: - Speaker Encoder
@@ -409,6 +415,38 @@ public final class Qwen3TTSModel: Module, SpeechGenerationModel, @unchecked Send
         refText: String? = nil,
         language: String? = nil,
         instruct: String? = nil,
+        generationParameters: GenerateParameters
+    ) async throws -> MLXArray {
+        // S11: Qwen3TTS.generate interval (Level 2 = .operations).
+        #if MLXAUDIO_TELEMETRY_FULL
+        if Telemetry.level >= .operations {
+            return try await Telemetry.emitIntervalAsync(
+                name: "Qwen3TTS.generate",
+                family: .qwen3TTS,
+                message: text.prefix(64).description
+            ) {
+                try await self._generateImpl(
+                    text: text, voice: voice, refAudio: refAudio, refText: refText,
+                    language: language, instruct: instruct,
+                    generationParameters: generationParameters
+                )
+            }
+        }
+        #endif
+        return try await _generateImpl(
+            text: text, voice: voice, refAudio: refAudio, refText: refText,
+            language: language, instruct: instruct,
+            generationParameters: generationParameters
+        )
+    }
+
+    private func _generateImpl(
+        text: String,
+        voice: String?,
+        refAudio: MLXArray?,
+        refText: String?,
+        language: String?,
+        instruct: String?,
         generationParameters: GenerateParameters
     ) async throws -> MLXArray {
         guard speechTokenizer != nil else {
@@ -861,6 +899,13 @@ public final class Qwen3TTSModel: Module, SpeechGenerationModel, @unchecked Send
             if step > 0 && step % 50 == 0 {
                 Memory.clearCache()
             }
+
+            // S13: per-token signpost (Level 4 = .verbose). Strips in release builds.
+            #if MLXAUDIO_TELEMETRY_FULL
+            if Telemetry.level >= .verbose {
+                Telemetry.emitEvent(family: .qwen3TTS, name: "Qwen3TTS.token", tokenIndex: step)
+            }
+            #endif
         }
 
         return generatedCodes
@@ -1635,7 +1680,22 @@ public final class Qwen3TTSModel: Module, SpeechGenerationModel, @unchecked Send
             // Sanitize and load talker weights
             let talkerWeights = Qwen3TTSTalkerForConditionalGeneration.sanitize(weights: allWeights)
             let talkerPairs = talkerWeights.map { ($0.key, $0.value) }
+            // S10: Qwen3TTS talker loadWeights interval (Level 2 = .operations).
+            #if MLXAUDIO_TELEMETRY_FULL
+            if Telemetry.level >= .operations {
+                try Telemetry.emitInterval(
+                    name: "Qwen3TTS.loadWeights",
+                    family: .qwen3TTS,
+                    message: "talker"
+                ) {
+                    try model.talker.update(parameters: ModuleParameters.unflattened(talkerPairs), verify: .noUnusedKeys)
+                }
+            } else {
+                try model.talker.update(parameters: ModuleParameters.unflattened(talkerPairs), verify: .noUnusedKeys)
+            }
+            #else
             try model.talker.update(parameters: ModuleParameters.unflattened(talkerPairs), verify: .noUnusedKeys)
+            #endif
             eval(model.talker.parameters())
 
             // Generate tokenizer.json if missing (Qwen3-TTS ships without it)
@@ -1685,7 +1745,22 @@ public final class Qwen3TTSModel: Module, SpeechGenerationModel, @unchecked Send
                 let sanitizedWeights = Qwen3TTSSpeakerEncoder.sanitize(weights: allWeights)
                 if !sanitizedWeights.isEmpty {
                     let pairs = sanitizedWeights.map { ($0.key, $0.value) }
+                    // S10: Qwen3TTS speakerEncoder loadWeights interval (Level 2).
+                    #if MLXAUDIO_TELEMETRY_FULL
+                    if Telemetry.level >= .operations {
+                        try Telemetry.emitInterval(
+                            name: "Qwen3TTS.loadWeights",
+                            family: .qwen3TTS,
+                            message: "speakerEncoder"
+                        ) {
+                            try speakerEncoder.update(parameters: ModuleParameters.unflattened(pairs), verify: .noUnusedKeys)
+                        }
+                    } else {
+                        try speakerEncoder.update(parameters: ModuleParameters.unflattened(pairs), verify: .noUnusedKeys)
+                    }
+                    #else
                     try speakerEncoder.update(parameters: ModuleParameters.unflattened(pairs), verify: .noUnusedKeys)
+                    #endif
                     eval(speakerEncoder.parameters())
                     model.speakerEncoder = speakerEncoder
                     print("Loaded speaker encoder (\(speakerEncoderConfig.encDim)-dim)")
@@ -1733,7 +1808,22 @@ public final class Qwen3TTSModel: Module, SpeechGenerationModel, @unchecked Send
         if !tokenizerWeights.isEmpty {
             let sanitized = Qwen3TTSSpeechTokenizer.sanitize(weights: tokenizerWeights)
             let pairs = sanitized.map { ($0.key, $0.value) }
+            // S10: Qwen3TTS speechTokenizer loadWeights interval (Level 2).
+            #if MLXAUDIO_TELEMETRY_FULL
+            if Telemetry.level >= .operations {
+                try Telemetry.emitInterval(
+                    name: "Qwen3TTS.loadWeights",
+                    family: .qwen3TTS,
+                    message: "speechTokenizer"
+                ) {
+                    try speechTokenizer.update(parameters: ModuleParameters.unflattened(pairs), verify: .noUnusedKeys)
+                }
+            } else {
+                try speechTokenizer.update(parameters: ModuleParameters.unflattened(pairs), verify: .noUnusedKeys)
+            }
+            #else
             try speechTokenizer.update(parameters: ModuleParameters.unflattened(pairs), verify: .noUnusedKeys)
+            #endif
             eval(speechTokenizer.parameters())
         }
 

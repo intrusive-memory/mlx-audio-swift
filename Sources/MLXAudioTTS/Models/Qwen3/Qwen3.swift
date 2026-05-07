@@ -528,7 +528,9 @@ public class Qwen3Model: Module, KVCacheDimensionProvider, SpeechGenerationModel
 
     public func makeCache() -> [KVCache] {
         return (0..<self.configuration.hiddenLayers).map { _ in
-            KVCacheSimple()
+            let cache = KVCacheSimple()
+            attachKVCacheLifecycle(family: "Qwen3", to: cache)
+            return cache
         }
     }
 
@@ -917,7 +919,22 @@ public class Qwen3Model: Module, KVCacheDimensionProvider, SpeechGenerationModel
                 }
             }
 
+            // S10: Qwen3 (LM) loadWeights interval (Level 2 = .operations).
+            #if MLXAUDIO_TELEMETRY_FULL
+            if Telemetry.level >= .operations {
+                try Telemetry.emitInterval(
+                    name: "Qwen3.loadWeights",
+                    family: .core,
+                    message: componentId
+                ) {
+                    try model.update(parameters: ModuleParameters.unflattened(sanitizedWeights), verify: [.all])
+                }
+            } else {
+                try model.update(parameters: ModuleParameters.unflattened(sanitizedWeights), verify: [.all])
+            }
+            #else
             try model.update(parameters: ModuleParameters.unflattened(sanitizedWeights), verify: [.all])
+            #endif
             eval(model)
 
             return (model, modelDir)

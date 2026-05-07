@@ -706,6 +706,12 @@ public class Qwen3ASRModel: Module {
                 bias: false
             )
         }
+        super.init()
+        Telemetry.trackLifecycle(self, className: "Qwen3ASR.Model")
+    }
+
+    deinit {
+        Telemetry.trackLifecycleEnd(className: "Qwen3ASR.Model")
     }
 
     // MARK: - Audio Features
@@ -955,7 +961,9 @@ public class Qwen3ASRModel: Module {
 
     public func makeCache() -> [KVCache] {
         return (0..<config.textConfig.numHiddenLayers).map { _ in
-            KVCacheSimple()
+            let cache = KVCacheSimple()
+            attachKVCacheLifecycle(family: "Qwen3ASR", to: cache)
+            return cache
         }
     }
 
@@ -996,6 +1004,7 @@ public class Qwen3ASRModel: Module {
         eval(logits)
 
         var generatedTokens: [Int] = []
+        var qwen3TokenStep = 0
 
         for _ in 0..<maxTokens {
             var lastLogits = logits[0..., -1, 0...]
@@ -1009,6 +1018,14 @@ public class Qwen3ASRModel: Module {
             }
 
             generatedTokens.append(nextToken)
+
+            // S13: per-token signpost (Level 4 = .verbose). Strips in release builds.
+            #if MLXAUDIO_TELEMETRY_FULL
+            if Telemetry.level >= .verbose {
+                Telemetry.emitEvent(family: .qwen3ASR, name: "Qwen3ASR.token", tokenIndex: qwen3TokenStep)
+            }
+            #endif
+            qwen3TokenStep += 1
 
             let nextTokenArray = MLXArray([Int32(nextToken)]).expandedDimensions(axis: 0)
             logits = callAsFunction(inputIds: nextTokenArray, cache: cache)
@@ -1055,6 +1072,7 @@ public class Qwen3ASRModel: Module {
         eval(logits)
 
         var generatedTokens: [Int] = []
+        var qwen3ChunkTokenStep = 0
 
         for _ in 0..<maxTokens {
             var lastLogits = logits[0..., -1, 0...]
@@ -1068,6 +1086,14 @@ public class Qwen3ASRModel: Module {
             }
 
             generatedTokens.append(nextToken)
+
+            // S13: per-token signpost (Level 4 = .verbose). Strips in release builds.
+            #if MLXAUDIO_TELEMETRY_FULL
+            if Telemetry.level >= .verbose {
+                Telemetry.emitEvent(family: .qwen3ASR, name: "Qwen3ASR.token", tokenIndex: qwen3ChunkTokenStep)
+            }
+            #endif
+            qwen3ChunkTokenStep += 1
 
             let nextTokenArray = MLXArray([Int32(nextToken)]).expandedDimensions(axis: 0)
             logits = callAsFunction(inputIds: nextTokenArray, cache: cache)
@@ -1107,6 +1133,38 @@ public class Qwen3ASRModel: Module {
         chunkDuration: Float = 1200.0,
         minChunkDuration: Float = 1.0,
         maxBatchSize: Int = Qwen3ASRModel.defaultMaxBatchSize
+    ) -> STTOutput {
+        // S11: Qwen3ASR.generate interval (Level 2 = .operations).
+        #if MLXAUDIO_TELEMETRY_FULL
+        if Telemetry.level >= .operations {
+            return Telemetry.emitInterval(
+                name: "Qwen3ASR.generate",
+                family: .qwen3ASR,
+                message: language
+            ) {
+                self._generateImpl(
+                    audio: audio, maxTokens: maxTokens, temperature: temperature,
+                    language: language, chunkDuration: chunkDuration,
+                    minChunkDuration: minChunkDuration, maxBatchSize: maxBatchSize
+                )
+            }
+        }
+        #endif
+        return _generateImpl(
+            audio: audio, maxTokens: maxTokens, temperature: temperature,
+            language: language, chunkDuration: chunkDuration,
+            minChunkDuration: minChunkDuration, maxBatchSize: maxBatchSize
+        )
+    }
+
+    private func _generateImpl(
+        audio: MLXArray,
+        maxTokens: Int,
+        temperature: Float,
+        language: String,
+        chunkDuration: Float,
+        minChunkDuration: Float,
+        maxBatchSize: Int
     ) -> STTOutput {
         let startTime = Date()
 
@@ -1587,7 +1645,22 @@ public class Qwen3ASRModel: Module {
             }
 
             // Load weights into model
+            // S10: Qwen3ASR loadWeights interval (Level 2 = .operations).
+            #if MLXAUDIO_TELEMETRY_FULL
+            if Telemetry.level >= .operations {
+                try Telemetry.emitInterval(
+                    name: "Qwen3ASR.loadWeights",
+                    family: .qwen3ASR,
+                    message: "qwen3-asr"
+                ) {
+                    try model.update(parameters: ModuleParameters.unflattened(sanitizedWeights), verify: [.all])
+                }
+            } else {
+                try model.update(parameters: ModuleParameters.unflattened(sanitizedWeights), verify: [.all])
+            }
+            #else
             try model.update(parameters: ModuleParameters.unflattened(sanitizedWeights), verify: [.all])
+            #endif
             eval(model)
 
             return (model, modelDir)
