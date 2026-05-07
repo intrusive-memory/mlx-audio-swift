@@ -613,7 +613,26 @@ public class LlamaTTSModel: Module, KVCacheDimensionProvider, SpeechGenerationMo
         instruct _: String?,
         generationParameters: GenerateParameters
     ) async throws -> MLXArray {
-        try await generate(
+        // S11: LlamaTTS.generate interval (Level 2 = .operations).
+        #if MLXAUDIO_TELEMETRY_FULL
+        if Telemetry.level >= .operations {
+            return try await Telemetry.emitIntervalAsync(
+                name: "LlamaTTS.generate",
+                family: .llamaTTS,
+                message: text.prefix(64).description
+            ) {
+                try await self.generate(
+                    text: text,
+                    voice: voice,
+                    refAudio: refAudio,
+                    refText: refText,
+                    cache: nil,
+                    parameters: generationParameters
+                )
+            }
+        }
+        #endif
+        return try await generate(
             text: text,
             voice: voice,
             refAudio: refAudio,

@@ -304,6 +304,16 @@ public class Vocos: Module {
 
     /// Decode features to audio waveform.
     public func decode(_ features: MLXArray, bandwidthId: MLXArray? = nil) -> MLXArray {
+        // S11: Vocos.decode interval (Level 2 = .operations).
+        #if MLXAUDIO_TELEMETRY_FULL
+        if Telemetry.level >= .operations {
+            return Telemetry.emitInterval(name: "Vocos.decode", family: .codecs) {
+                let x = self.backbone(features, bandwidthId: bandwidthId)
+                let audioOutput = self.head(x)
+                return audioOutput
+            }
+        }
+        #endif
         let x = backbone(features, bandwidthId: bandwidthId)
         let audioOutput = head(x)
         return audioOutput

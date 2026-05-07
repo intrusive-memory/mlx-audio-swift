@@ -378,6 +378,35 @@ public class GLMASRModel: Module {
         topK: Int = 0,
         verbose: Bool = false
     ) -> STTOutput {
+        // S11: GLMASR.generate interval (Level 2 = .operations).
+        #if MLXAUDIO_TELEMETRY_FULL
+        if Telemetry.level >= .operations {
+            return Telemetry.emitInterval(
+                name: "GLMASR.generate",
+                family: .glmASR,
+                message: ""
+            ) {
+                self._glmGenerateImpl(
+                    audio: audio, maxTokens: maxTokens, temperature: temperature,
+                    topP: topP, topK: topK, verbose: verbose
+                )
+            }
+        }
+        #endif
+        return _glmGenerateImpl(
+            audio: audio, maxTokens: maxTokens, temperature: temperature,
+            topP: topP, topK: topK, verbose: verbose
+        )
+    }
+
+    private func _glmGenerateImpl(
+        audio: MLXArray,
+        maxTokens: Int,
+        temperature: Float,
+        topP: Float,
+        topK: Int,
+        verbose: Bool
+    ) -> STTOutput {
         guard let tokenizer = tokenizer else {
             fatalError("Tokenizer not loaded")
         }

@@ -285,7 +285,24 @@ public class SopranoModel: Module, KVCacheDimensionProvider, SpeechGenerationMod
         instruct _: String?,
         generationParameters: GenerateParameters
     ) async throws -> MLXArray {
-        try await generate(
+        // S11: SopranoTTS.generate interval (Level 2 = .operations).
+        #if MLXAUDIO_TELEMETRY_FULL
+        if Telemetry.level >= .operations {
+            return try await Telemetry.emitIntervalAsync(
+                name: "SopranoTTS.generate",
+                family: .sopranoTTS,
+                message: text.prefix(64).description
+            ) {
+                try await self.generate(
+                    text: text,
+                    voice: voice,
+                    splitPattern: "\n",
+                    parameters: generationParameters
+                )
+            }
+        }
+        #endif
+        return try await generate(
             text: text,
             voice: voice,
             splitPattern: "\n",

@@ -172,6 +172,19 @@ public final class Mimi: Module {
     public var sampleRate: Double { cfg.sampleRate }
 
     public func encode(_ xs: MLXArray) -> MLXArray {
+        // S11: Mimi.encode interval (Level 2 = .operations).
+        #if MLXAUDIO_TELEMETRY_FULL
+        if Telemetry.level >= .operations {
+            return Telemetry.emitInterval(name: "Mimi.encode", family: .codecs) {
+                self.encoder.resetState()
+                for c in self.encoderCache { c.trim(c.offset) }
+                var z = self.encoder(xs)
+                z = self.encoder_transformer(z, cache: self.encoderCache)[0]
+                z = self.downsample(z)
+                return self.quantizer.encode(z)
+            }
+        }
+        #endif
         encoder.resetState()
         for c in encoderCache { c.trim(c.offset)  }
 
@@ -182,6 +195,19 @@ public final class Mimi: Module {
     }
 
     public func decode(_ codes: MLXArray) -> MLXArray {
+        // S11: Mimi.decode interval (Level 2 = .operations).
+        #if MLXAUDIO_TELEMETRY_FULL
+        if Telemetry.level >= .operations {
+            return Telemetry.emitInterval(name: "Mimi.decode", family: .codecs) {
+                self.decoder.resetState()
+                for c in self.decoderCache { c.trim(c.offset) }
+                var z = self.quantizer.decode(codes)
+                z = self.upsample(z)
+                z = self.decoder_transformer(z, cache: self.decoderCache)[0]
+                return self.decoder(z)
+            }
+        }
+        #endif
         decoder.resetState()
         for c in decoderCache { c.trim(c.offset)  }
 

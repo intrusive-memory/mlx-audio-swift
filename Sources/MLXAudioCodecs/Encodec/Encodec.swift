@@ -255,6 +255,22 @@ public class Encodec: Module {
         paddingMask: MLXArray? = nil,
         bandwidth: Float? = nil
     ) -> (MLXArray, [MLXArray?]) {
+        // S11: Encodec.encode interval (Level 2 = .operations).
+        #if MLXAUDIO_TELEMETRY_FULL
+        if Telemetry.level >= .operations {
+            return Telemetry.emitInterval(name: "Encodec.encode", family: .codecs) {
+                self._encodecEncodeImpl(inputValues, paddingMask: paddingMask, bandwidth: bandwidth)
+            }
+        }
+        #endif
+        return _encodecEncodeImpl(inputValues, paddingMask: paddingMask, bandwidth: bandwidth)
+    }
+
+    private func _encodecEncodeImpl(
+        _ inputValues: MLXArray,
+        paddingMask: MLXArray?,
+        bandwidth: Float?
+    ) -> (MLXArray, [MLXArray?]) {
         let bw = bandwidth ?? config.targetBandwidths[0]
 
         guard config.targetBandwidths.contains(bw) else {
@@ -372,6 +388,22 @@ public class Encodec: Module {
         _ audioCodes: MLXArray,
         _ audioScales: [MLXArray?],
         paddingMask: MLXArray? = nil
+    ) -> MLXArray {
+        // S11: Encodec.decode interval (Level 2 = .operations).
+        #if MLXAUDIO_TELEMETRY_FULL
+        if Telemetry.level >= .operations {
+            return Telemetry.emitInterval(name: "Encodec.decode", family: .codecs) {
+                self._encodecDecodeImpl(audioCodes, audioScales, paddingMask: paddingMask)
+            }
+        }
+        #endif
+        return _encodecDecodeImpl(audioCodes, audioScales, paddingMask: paddingMask)
+    }
+
+    private func _encodecDecodeImpl(
+        _ audioCodes: MLXArray,
+        _ audioScales: [MLXArray?],
+        paddingMask: MLXArray?
     ) -> MLXArray {
         var audioValues: MLXArray
 

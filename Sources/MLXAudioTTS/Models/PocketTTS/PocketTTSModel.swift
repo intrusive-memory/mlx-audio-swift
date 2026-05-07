@@ -297,6 +297,38 @@ public final class PocketTTSModel: Module, SpeechGenerationModel, @unchecked Sen
         instruct: String?,
         generationParameters: GenerateParameters
     ) async throws -> MLXArray {
+        // S11: PocketTTS.generate interval (Level 2 = .operations).
+        #if MLXAUDIO_TELEMETRY_FULL
+        if Telemetry.level >= .operations {
+            return try await Telemetry.emitIntervalAsync(
+                name: "PocketTTS.generate",
+                family: .pocketTTS,
+                message: text.prefix(64).description
+            ) {
+                try await self._generateImpl(
+                    text: text, voice: voice, refAudio: refAudio, refText: refText,
+                    language: language, instruct: instruct,
+                    generationParameters: generationParameters
+                )
+            }
+        }
+        #endif
+        return try await _generateImpl(
+            text: text, voice: voice, refAudio: refAudio, refText: refText,
+            language: language, instruct: instruct,
+            generationParameters: generationParameters
+        )
+    }
+
+    private func _generateImpl(
+        text: String,
+        voice: String?,
+        refAudio: MLXArray?,
+        refText: String?,
+        language: String?,
+        instruct: String?,
+        generationParameters: GenerateParameters
+    ) async throws -> MLXArray {
         _ = refText
         _ = language
 

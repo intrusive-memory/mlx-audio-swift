@@ -417,6 +417,38 @@ public final class Qwen3TTSModel: Module, SpeechGenerationModel, @unchecked Send
         instruct: String? = nil,
         generationParameters: GenerateParameters
     ) async throws -> MLXArray {
+        // S11: Qwen3TTS.generate interval (Level 2 = .operations).
+        #if MLXAUDIO_TELEMETRY_FULL
+        if Telemetry.level >= .operations {
+            return try await Telemetry.emitIntervalAsync(
+                name: "Qwen3TTS.generate",
+                family: .qwen3TTS,
+                message: text.prefix(64).description
+            ) {
+                try await self._generateImpl(
+                    text: text, voice: voice, refAudio: refAudio, refText: refText,
+                    language: language, instruct: instruct,
+                    generationParameters: generationParameters
+                )
+            }
+        }
+        #endif
+        return try await _generateImpl(
+            text: text, voice: voice, refAudio: refAudio, refText: refText,
+            language: language, instruct: instruct,
+            generationParameters: generationParameters
+        )
+    }
+
+    private func _generateImpl(
+        text: String,
+        voice: String?,
+        refAudio: MLXArray?,
+        refText: String?,
+        language: String?,
+        instruct: String?,
+        generationParameters: GenerateParameters
+    ) async throws -> MLXArray {
         guard speechTokenizer != nil else {
             throw AudioGenerationError.modelNotInitialized("Speech tokenizer not loaded")
         }

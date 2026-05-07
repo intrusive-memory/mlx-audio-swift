@@ -1116,6 +1116,38 @@ public class Qwen3ASRModel: Module {
         minChunkDuration: Float = 1.0,
         maxBatchSize: Int = Qwen3ASRModel.defaultMaxBatchSize
     ) -> STTOutput {
+        // S11: Qwen3ASR.generate interval (Level 2 = .operations).
+        #if MLXAUDIO_TELEMETRY_FULL
+        if Telemetry.level >= .operations {
+            return Telemetry.emitInterval(
+                name: "Qwen3ASR.generate",
+                family: .qwen3ASR,
+                message: language
+            ) {
+                self._generateImpl(
+                    audio: audio, maxTokens: maxTokens, temperature: temperature,
+                    language: language, chunkDuration: chunkDuration,
+                    minChunkDuration: minChunkDuration, maxBatchSize: maxBatchSize
+                )
+            }
+        }
+        #endif
+        return _generateImpl(
+            audio: audio, maxTokens: maxTokens, temperature: temperature,
+            language: language, chunkDuration: chunkDuration,
+            minChunkDuration: minChunkDuration, maxBatchSize: maxBatchSize
+        )
+    }
+
+    private func _generateImpl(
+        audio: MLXArray,
+        maxTokens: Int,
+        temperature: Float,
+        language: String,
+        chunkDuration: Float,
+        minChunkDuration: Float,
+        maxBatchSize: Int
+    ) -> STTOutput {
         let startTime = Date()
 
         // Split audio into chunks

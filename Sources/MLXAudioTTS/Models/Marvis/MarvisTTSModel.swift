@@ -582,7 +582,41 @@ extension MarvisTTSModel: SpeechGenerationModel, @unchecked Sendable {
         instruct: String?,
         generationParameters: GenerateParameters
     ) async throws -> MLXArray {
+        // S11: MarvisTTS.generate interval (Level 2 = .operations).
+        #if MLXAUDIO_TELEMETRY_FULL
+        if Telemetry.level >= .operations {
+            return try await Telemetry.emitIntervalAsync(
+                name: "MarvisTTS.generate",
+                family: .marvisTTS,
+                message: text.prefix(64).description
+            ) {
+                try await self._marvisGenerateImpl(
+                    text: text, voice: voice, refAudio: refAudio, refText: refText,
+                    language: language, instruct: instruct,
+                    generationParameters: generationParameters
+                )
+            }
+        }
+        #endif
+        return try await _marvisGenerateImpl(
+            text: text, voice: voice, refAudio: refAudio, refText: refText,
+            language: language, instruct: instruct,
+            generationParameters: generationParameters
+        )
+    }
+
+    private func _marvisGenerateImpl(
+        text: String,
+        voice: String?,
+        refAudio: MLXArray?,
+        refText: String?,
+        language: String?,
+        instruct: String?,
+        generationParameters: GenerateParameters
+    ) async throws -> MLXArray {
         _ = generationParameters
+        _ = language
+        _ = instruct
         let resolvedVoice = try resolveVoice(from: voice)
 
         let audio = try await generate(

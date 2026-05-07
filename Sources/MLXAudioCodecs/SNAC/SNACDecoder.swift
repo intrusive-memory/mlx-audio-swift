@@ -123,6 +123,17 @@ public class SNAC: Module {
     }
 
     public func encode(_ audioData: MLXArray) -> [MLXArray] {
+        // S11: SNAC.encode interval (Level 2 = .operations).
+        #if MLXAUDIO_TELEMETRY_FULL
+        if Telemetry.level >= .operations {
+            return Telemetry.emitInterval(name: "SNAC.encode", family: .codecs) {
+                let preprocessed = self.preprocess(audioData)
+                let z = self.encoder(preprocessed)
+                let (_, codes) = self.quantizer(z)
+                return codes
+            }
+        }
+        #endif
         let preprocessed = preprocess(audioData)
         let z = encoder(preprocessed)
         let (_, codes) = quantizer(z)
@@ -130,6 +141,16 @@ public class SNAC: Module {
     }
 
     public func decode(_ codes: [MLXArray]) -> MLXArray {
+        // S11: SNAC.decode interval (Level 2 = .operations).
+        #if MLXAUDIO_TELEMETRY_FULL
+        if Telemetry.level >= .operations {
+            return Telemetry.emitInterval(name: "SNAC.decode", family: .codecs) {
+                let zQ = self.quantizer.fromCodes(codes)
+                let audioHat = self.decoder(zQ)
+                return audioHat
+            }
+        }
+        #endif
         let zQ = quantizer.fromCodes(codes)
         let audioHat = decoder(zQ)
         return audioHat
