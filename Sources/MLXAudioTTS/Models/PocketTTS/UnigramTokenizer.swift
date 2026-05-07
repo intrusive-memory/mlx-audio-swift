@@ -1,3 +1,5 @@
+import MLXAudioCore
+
 struct TokenLattice {
     let sentence: String
     let bosTokenId: Int
@@ -202,6 +204,11 @@ public final class UnigramTokenizer {
 
         trie = Trie()
         trie.append(contentsOf: vocab.map { $0.token })
+        Telemetry.trackLifecycle(self, className: "Core.Tokenizer")
+    }
+
+    deinit {
+        Telemetry.trackLifecycleEnd(className: "Core.Tokenizer")
     }
 
     func encodeWithByteFallback(_ text: String) -> [Int] {

@@ -353,6 +353,12 @@ public class Qwen3ForcedAlignerModel: Module {
             classifyNum,
             bias: false
         )
+        super.init()
+        Telemetry.trackLifecycle(self, className: "Qwen3ASR.Aligner")
+    }
+
+    deinit {
+        Telemetry.trackLifecycleEnd(className: "Qwen3ASR.Aligner")
     }
 
     public func callAsFunction(

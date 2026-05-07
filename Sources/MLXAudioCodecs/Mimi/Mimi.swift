@@ -392,5 +392,10 @@ public final class MimiTokenizer {
     public init(_ codec: Mimi) {
         codec.train(false)
         self.codec = codec
+        Telemetry.trackLifecycle(self, className: "Mimi.Tokenizer")
+    }
+
+    deinit {
+        Telemetry.trackLifecycleEnd(className: "Mimi.Tokenizer")
     }
 }

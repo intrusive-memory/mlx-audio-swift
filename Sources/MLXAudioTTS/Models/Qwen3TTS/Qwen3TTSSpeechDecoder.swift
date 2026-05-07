@@ -739,6 +739,12 @@ final class Qwen3TTSSpeechTokenizer: Module {
         } else {
             self._encoderModel.wrappedValue = nil
         }
+        super.init()
+        Telemetry.trackLifecycle(self, className: "Qwen3TTS.Tokenizer")
+    }
+
+    deinit {
+        Telemetry.trackLifecycleEnd(className: "Qwen3TTS.Tokenizer")
     }
 
     func decode(_ audioCodes: MLXArray) -> (MLXArray, MLXArray) {
