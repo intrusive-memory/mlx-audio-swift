@@ -76,10 +76,11 @@ let package = Package(
             .upToNextMajor(from: "0.31.3")),
         .package(url: "https://github.com/ml-explore/mlx-swift-lm.git",
             .upToNextMajor(from: "3.31.3")),
+        // swift-tokenizers-mlx 0.3.0+ and swift-tokenizers 0.5.0+ are Swift-only; no traits needed.
         .package(url: "https://github.com/DePasqualeOrg/swift-tokenizers-mlx",
-            .upToNextMajor(from: "0.2.0"), traits: ["Swift"]),
+            .upToNextMajor(from: "0.3.0")),
         .package(url: "https://github.com/DePasqualeOrg/swift-tokenizers.git",
-            .upToNextMajor(from: "0.4.3"), traits: ["Swift"]),
+            .upToNextMajor(from: "0.5.0")),
         sibling(
           "SwiftAcervo",
           remote: "https://github.com/intrusive-memory/SwiftAcervo.git",
