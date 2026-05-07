@@ -1,12 +1,14 @@
 import Foundation
+import os
 
 /// Top-level namespace for the MLXAudio telemetry surface.
 ///
 /// Exposes a leveled severity model (`Telemetry.Level`) and the public
-/// snapshot/reset API used for in-process leak detection. The real
-/// resolution of `level` and `ceiling` from the `MLXAUDIO_TELEMETRY` env
-/// var and the `MLXAUDIO_TELEMETRY_FULL` compile flag lands in Sortie 2;
-/// this file declares only the types and stub accessors.
+/// snapshot/reset API used for in-process leak detection. The active
+/// `level` is resolved once-per-process from the `MLXAUDIO_TELEMETRY`
+/// environment variable and clamped to the compile-time `ceiling` (which
+/// is `.verbose` under `MLXAUDIO_TELEMETRY_FULL` and `.lifecycle`
+/// otherwise).
 public enum Telemetry {
 
     /// Telemetry severity level. Levels are monotonic — each level
@@ -30,21 +32,121 @@ public enum Telemetry {
         }
     }
 
-    /// Currently active level. Resolved at first access from
-    /// `MLXAUDIO_TELEMETRY` env var, clamped to the compile-time ceiling.
-    ///
-    /// - Note: Sortie 1 stub — returns `.lifecycle` placeholder. Real
-    ///   env-var resolution lands in Sortie 2.
-    public static var level: Level {
-        .lifecycle
+    /// Compile-time ceiling. `.lifecycle` in release builds, `.verbose`
+    /// when `MLXAUDIO_TELEMETRY_FULL` is defined (debug + tests).
+    public static var ceiling: Level {
+        #if MLXAUDIO_TELEMETRY_FULL
+        return .verbose
+        #else
+        return .lifecycle
+        #endif
     }
 
-    /// Compile-time ceiling. `.lifecycle` in release builds, `.verbose`
-    /// when `MLXAUDIO_TELEMETRY_FULL` is defined.
+    /// Currently active telemetry level. Resolved at first access from
+    /// `MLXAUDIO_TELEMETRY` (case-insensitive), defaulting to `.lifecycle`
+    /// when the variable is unset or unparseable, then clamped to
+    /// `ceiling`. If the requested level exceeded the ceiling, a single
+    /// warning is emitted (once per process) on the
+    /// `MLXAudio.Telemetry` logger.
     ///
-    /// - Note: Sortie 1 stub — returns `.lifecycle` placeholder. Real
-    ///   `#if MLXAUDIO_TELEMETRY_FULL` gating lands in Sortie 2.
-    public static var ceiling: Level {
-        .lifecycle
+    /// The resolved value is cached on first access; subsequent reads
+    /// are O(1) and safe for hot-path use.
+    public static var level: Level {
+        ResolvedLevel.shared.level
+    }
+
+    // MARK: - Internal: resolution & testability hooks
+
+    /// Pure resolver used by both the cached `Telemetry.level` accessor
+    /// and the unit tests in `TelemetryConfigTests`. Does NOT touch the
+    /// cached singleton so tests can exercise every parse path
+    /// deterministically.
+    ///
+    /// - Parameters:
+    ///   - rawValue: Raw env var contents (`nil` if unset).
+    ///   - ceiling: Compile-time ceiling to clamp to.
+    ///   - warn: Closure invoked exactly once if the requested level
+    ///     exceeded the ceiling. Pure resolver does not deduplicate
+    ///     across calls — callers are responsible for one-shot semantics.
+    /// - Returns: Resolved level (clamped to `ceiling`).
+    static func resolveLevel(
+        rawValue: String?,
+        ceiling: Level,
+        warn: (Level) -> Void
+    ) -> Level {
+        let requested = parseLevel(rawValue) ?? .lifecycle
+        if requested > ceiling {
+            warn(requested)
+            return ceiling
+        }
+        return requested
+    }
+
+    /// Parse a raw env-var string into a `Level`. Case-insensitive.
+    /// Returns `nil` when the input is `nil`, empty, or not one of the
+    /// known names.
+    static func parseLevel(_ raw: String?) -> Level? {
+        guard let raw else { return nil }
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        switch trimmed.lowercased() {
+        case "off":        return .off
+        case "lifecycle":  return .lifecycle
+        case "operations": return .operations
+        case "memory":     return .memory
+        case "verbose":    return .verbose
+        default:           return nil
+        }
+    }
+
+    // MARK: - Cached singleton
+
+    /// Process-wide cache of the resolved level. Swift's static `let`
+    /// initialization is thread-safe and runs at most once, which gives
+    /// us the required "warn at most once per process" semantic for
+    /// free.
+    private struct ResolvedLevel {
+        let level: Level
+
+        static let shared = ResolvedLevel(
+            env: ProcessInfo.processInfo.environment,
+            ceiling: Telemetry.ceiling
+        )
+
+        init(env: [String: String], ceiling: Level) {
+            self.level = Telemetry.resolveLevel(
+                rawValue: env["MLXAUDIO_TELEMETRY"],
+                ceiling: ceiling,
+                warn: { requested in
+                    Telemetry.logClampWarning(requested: requested, ceiling: ceiling)
+                }
+            )
+        }
+    }
+
+    // MARK: - One-shot logger
+
+    /// Dedicated logger for telemetry-internal warnings. Subsystem
+    /// `"MLXAudio.Telemetry"` matches Section 4 of the requirements doc.
+    /// The full per-subsystem logger map (S3) lands later under
+    /// `MLXAudioLogging`; we only declare what S2 needs.
+    static let warningLogger = Logger(
+        subsystem: "MLXAudio.Telemetry",
+        category: "telemetry"
+    )
+
+    /// Emit the clamp-to-ceiling warning. Called from the cached
+    /// resolver; firing happens at most once per process because the
+    /// `ResolvedLevel.shared` initializer runs at most once.
+    static func logClampWarning(requested: Level, ceiling: Level) {
+        warningLogger.warning(
+            """
+            MLXAUDIO_TELEMETRY requested level \(String(describing: requested), privacy: .public) \
+            exceeds compile-time ceiling \(String(describing: ceiling), privacy: .public); \
+            clamping to \(String(describing: ceiling), privacy: .public). \
+            Rebuild with MLXAUDIO_TELEMETRY_FULL to enable higher levels.
+            """
+        )
     }
 }
+
