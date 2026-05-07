@@ -256,6 +256,12 @@ public class DACVAE: Module {
             channels: config.decoderDim,
             rates: config.decoderRates
         )
+        super.init()
+        Telemetry.trackLifecycle(self, className: "DAC.Model")
+    }
+
+    deinit {
+        Telemetry.trackLifecycleEnd(className: "DAC.Model")
     }
 
     /// Pad waveform to be divisible by hop_length.
@@ -275,6 +281,19 @@ public class DACVAE: Module {
     /// - Parameter waveform: Audio tensor of shape (batch, length, 1)
     /// - Returns: Latent features of shape (batch, channels, frames)
     public func encode(_ waveform: MLXArray) -> MLXArray {
+        // S11: DAC.encode interval (Level 2 = .operations).
+        #if MLXAUDIO_TELEMETRY_FULL
+        if Telemetry.level >= .operations {
+            return Telemetry.emitInterval(name: "DAC.encode", family: .codecs) {
+                let wav = self.pad(waveform)
+                let z = self.encoder(wav)
+                let proj = self.quantizerInProj(z)
+                let splits = proj.split(parts: 2, axis: -1)
+                let mean = splits[0]
+                return mean.transposed(0, 2, 1)
+            }
+        }
+        #endif
         let wav = pad(waveform)
         let z = encoder(wav)
 
@@ -297,6 +316,18 @@ public class DACVAE: Module {
     ///   - chunkSize: If provided, decode in chunks of this many frames
     /// - Returns: Waveform of shape (batch, length, 1)
     public func decode(_ encodedFrames: MLXArray, chunkSize: Int? = nil) -> MLXArray {
+        // S11: DAC.decode interval (Level 2 = .operations).
+        #if MLXAUDIO_TELEMETRY_FULL
+        if Telemetry.level >= .operations {
+            return Telemetry.emitInterval(name: "DAC.decode", family: .codecs) {
+                self._dacDecodeImpl(encodedFrames, chunkSize: chunkSize)
+            }
+        }
+        #endif
+        return _dacDecodeImpl(encodedFrames, chunkSize: chunkSize)
+    }
+
+    private func _dacDecodeImpl(_ encodedFrames: MLXArray, chunkSize: Int?) -> MLXArray {
         // Use chunked decoding for memory efficiency if requested
         if let chunk = chunkSize {
             return decodeChunked(encodedFrames, chunkSize: chunk)
@@ -415,7 +446,22 @@ public class DACVAE: Module {
             // Load weights
             let weightsURL = modelURL.appendingPathComponent("model.safetensors")
             let weights = try loadArrays(url: weightsURL)
+            // S10: DACVAE loadWeights interval (Level 2 = .operations).
+            #if MLXAUDIO_TELEMETRY_FULL
+            if Telemetry.level >= .operations {
+                try Telemetry.emitInterval(
+                    name: "DACVAE.loadWeights",
+                    family: .codecs,
+                    message: "dac-vae"
+                ) {
+                    try model.update(parameters: ModuleParameters.unflattened(weights), verify: .noUnusedKeys)
+                }
+            } else {
+                try model.update(parameters: ModuleParameters.unflattened(weights), verify: .noUnusedKeys)
+            }
+            #else
             try model.update(parameters: ModuleParameters.unflattened(weights), verify: .noUnusedKeys)
+            #endif
 
             eval(model.parameters())
 

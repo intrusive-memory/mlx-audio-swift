@@ -304,6 +304,12 @@ public class GLMASRModel: Module {
 
         self._audioEncoder.wrappedValue = AudioEncoder(config: config)
         self._languageModel.wrappedValue = GLMASRLanguageModel(config: config.lmConfig)
+        super.init()
+        Telemetry.trackLifecycle(self, className: "GLMASR.Model")
+    }
+
+    deinit {
+        Telemetry.trackLifecycleEnd(className: "GLMASR.Model")
     }
 
     // MARK: - Public API
@@ -372,6 +378,35 @@ public class GLMASRModel: Module {
         topK: Int = 0,
         verbose: Bool = false
     ) -> STTOutput {
+        // S11: GLMASR.generate interval (Level 2 = .operations).
+        #if MLXAUDIO_TELEMETRY_FULL
+        if Telemetry.level >= .operations {
+            return Telemetry.emitInterval(
+                name: "GLMASR.generate",
+                family: .glmASR,
+                message: ""
+            ) {
+                self._glmGenerateImpl(
+                    audio: audio, maxTokens: maxTokens, temperature: temperature,
+                    topP: topP, topK: topK, verbose: verbose
+                )
+            }
+        }
+        #endif
+        return _glmGenerateImpl(
+            audio: audio, maxTokens: maxTokens, temperature: temperature,
+            topP: topP, topK: topK, verbose: verbose
+        )
+    }
+
+    private func _glmGenerateImpl(
+        audio: MLXArray,
+        maxTokens: Int,
+        temperature: Float,
+        topP: Float,
+        topK: Int,
+        verbose: Bool
+    ) -> STTOutput {
         guard let tokenizer = tokenizer else {
             fatalError("Tokenizer not loaded")
         }
@@ -384,6 +419,7 @@ public class GLMASRModel: Module {
 
         // Generate tokens
         var generatedTokens: [Int] = []
+        var glmTokenStep = 0
 
         for _ in 0..<maxTokens {
             let nextToken = ctx.sampleNextToken(temperature: temperature)
@@ -397,6 +433,14 @@ public class GLMASRModel: Module {
             if verbose {
                 print(ctx.decode(nextToken), terminator: "")
             }
+
+            // S13: per-token signpost (Level 4 = .verbose). Strips in release builds.
+            #if MLXAUDIO_TELEMETRY_FULL
+            if Telemetry.level >= .verbose {
+                Telemetry.emitEvent(family: .glmASR, name: "GLMASR.token", tokenIndex: glmTokenStep)
+            }
+            #endif
+            glmTokenStep += 1
 
             // Step to next token
             ctx = stepGeneration(context: ctx, nextToken: nextToken)
@@ -449,21 +493,30 @@ public class GLMASRModel: Module {
                 
                 let generateStartTime = Date()
                 var generatedTokens: [Int] = []
-                
+                var glmStreamTokenStep = 0
+
                 // Generate tokens
                 for _ in 0..<maxTokens {
                     let nextToken = ctx.sampleNextToken(temperature: temperature)
-                    
+
                     if ctx.isEOS(nextToken) {
                         break
                     }
-                    
+
                     generatedTokens.append(nextToken)
-                    
+
                     // Emit token
                     let tokenText = ctx.decode(nextToken)
                     continuation.yield(.token(tokenText))
-                    
+
+                    // S13: per-token signpost (Level 4 = .verbose). Strips in release builds.
+                    #if MLXAUDIO_TELEMETRY_FULL
+                    if Telemetry.level >= .verbose {
+                        Telemetry.emitEvent(family: .glmASR, name: "GLMASR.token", tokenIndex: glmStreamTokenStep)
+                    }
+                    #endif
+                    glmStreamTokenStep += 1
+
                     // Step to next token
                     ctx = self.stepGeneration(context: ctx, nextToken: nextToken)
                 }
@@ -511,7 +564,9 @@ public class GLMASRModel: Module {
     /// Create KV cache for generation.
     public func makeCache() -> [KVCache] {
         return (0..<config.lmConfig.numHiddenLayers).map { _ in
-            KVCacheSimple()
+            let cache = KVCacheSimple()
+            attachKVCacheLifecycle(family: "GLMASR", to: cache)
+            return cache
         }
     }
 
@@ -622,7 +677,22 @@ public class GLMASRModel: Module {
                     }
                 }
             }
+            // S10: GLMASR loadWeights interval (Level 2 = .operations).
+            #if MLXAUDIO_TELEMETRY_FULL
+            if Telemetry.level >= .operations {
+                try Telemetry.emitInterval(
+                    name: "GLMASR.loadWeights",
+                    family: .glmASR,
+                    message: "glm-asr"
+                ) {
+                    try model.update(parameters: ModuleParameters.unflattened(sanitizedWeights), verify: [.all])
+                }
+            } else {
+                try model.update(parameters: ModuleParameters.unflattened(sanitizedWeights), verify: [.all])
+            }
+            #else
             try model.update(parameters: ModuleParameters.unflattened(sanitizedWeights), verify: [.all])
+            #endif
 
             eval(model)
 

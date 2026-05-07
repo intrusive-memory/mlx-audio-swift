@@ -7,6 +7,7 @@
 
 import Foundation
 import MLX
+import MLXAudioCore
 import MLXNN
 
 // MARK: - AdaLayerNorm
@@ -293,10 +294,26 @@ public class Vocos: Module {
     ) {
         self._backbone.wrappedValue = backbone
         self._head.wrappedValue = head
+        super.init()
+        Telemetry.trackLifecycle(self, className: "Vocos.Model")
+    }
+
+    deinit {
+        Telemetry.trackLifecycleEnd(className: "Vocos.Model")
     }
 
     /// Decode features to audio waveform.
     public func decode(_ features: MLXArray, bandwidthId: MLXArray? = nil) -> MLXArray {
+        // S11: Vocos.decode interval (Level 2 = .operations).
+        #if MLXAUDIO_TELEMETRY_FULL
+        if Telemetry.level >= .operations {
+            return Telemetry.emitInterval(name: "Vocos.decode", family: .codecs) {
+                let x = self.backbone(features, bandwidthId: bandwidthId)
+                let audioOutput = self.head(x)
+                return audioOutput
+            }
+        }
+        #endif
         let x = backbone(features, bandwidthId: bandwidthId)
         let audioOutput = head(x)
         return audioOutput

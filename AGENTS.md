@@ -591,6 +591,17 @@ Tests use **Swift Testing** framework (`@Test`, `#expect`, `@Suite`), not XCTest
 - **@ModuleInfo mutation**: Never mutate `@ModuleInfo` properties directly after init; use `update(modules:)` or `update(parameters:)` instead
 - **ICL repetition penalty**: Minimum 1.5 for ICL generation to prevent code degeneration with long reference prefills
 
+## Telemetry
+
+The library ships an in-process telemetry surface for leak detection and
+performance tracing. Default level is `.lifecycle` (paired init/deinit counters
+on every long-lived object); higher levels require a debug build and an env-var
+override.
+
+- **Telemetry**: see [docs/TELEMETRY_USAGE.md](docs/TELEMETRY_USAGE.md) for level/env-var/Instruments examples.
+- Full specification: [docs/TELEMETRY_REQUIREMENTS.md](docs/TELEMETRY_REQUIREMENTS.md)
+- Test-side patterns: [Tests/MLXAudioTests/README.md](Tests/MLXAudioTests/README.md)
+
 ## App Group configuration (required)
 
 This package depends on [SwiftAcervo](https://github.com/intrusive-memory/SwiftAcervo) for shared model storage. SwiftAcervo v0.10.0 resolves its App Group ID in this order: `ACERVO_APP_GROUP_ID` env var → `com.apple.security.application-groups` entitlement (macOS only) → `fatalError`. There is **no silent fallback**.

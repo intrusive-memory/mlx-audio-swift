@@ -2,6 +2,7 @@ import Foundation
 @preconcurrency import MLX
 import MLXNN
 import MLXLMCommon
+import MLXAudioCore
 
 @inline(__always)
 private func pocketCreateAdditiveCausalMask(_ n: Int, offset: Int = 0) -> MLXArray {
@@ -220,7 +221,11 @@ public final class PocketStreamingTransformer: Module {
 
     public func callAsFunction(_ x: MLXArray, cache: [KVCacheSimple]?) -> MLXArray {
         var h = x
-        let caches = cache ?? (0..<layers.count).map { _ in KVCacheSimple() }
+        let caches = cache ?? (0..<layers.count).map { _ in
+            let c = KVCacheSimple()
+            attachKVCacheLifecycle(family: "PocketTTS", to: c)
+            return c
+        }
         for (layer, layerCache) in zip(layers, caches) {
             h = layer(h, cache: layerCache)
         }
@@ -228,6 +233,10 @@ public final class PocketStreamingTransformer: Module {
     }
 
     public func makeCache() -> [KVCacheSimple] {
-        return (0..<layers.count).map { _ in KVCacheSimple() }
+        return (0..<layers.count).map { _ in
+            let cache = KVCacheSimple()
+            attachKVCacheLifecycle(family: "PocketTTS", to: cache)
+            return cache
+        }
     }
 }

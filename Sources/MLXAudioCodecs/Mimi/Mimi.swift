@@ -153,6 +153,12 @@ public final class Mimi: Module {
 
         self.encoderCache = _encoder_transformer.wrappedValue.makeCache()
         self.decoderCache = _decoder_transformer.wrappedValue.makeCache()
+        super.init()
+        Telemetry.trackLifecycle(self, className: "Mimi.Model")
+    }
+
+    deinit {
+        Telemetry.trackLifecycleEnd(className: "Mimi.Model")
     }
 
     public func resetState() {
@@ -166,6 +172,19 @@ public final class Mimi: Module {
     public var sampleRate: Double { cfg.sampleRate }
 
     public func encode(_ xs: MLXArray) -> MLXArray {
+        // S11: Mimi.encode interval (Level 2 = .operations).
+        #if MLXAUDIO_TELEMETRY_FULL
+        if Telemetry.level >= .operations {
+            return Telemetry.emitInterval(name: "Mimi.encode", family: .codecs) {
+                self.encoder.resetState()
+                for c in self.encoderCache { c.trim(c.offset) }
+                var z = self.encoder(xs)
+                z = self.encoder_transformer(z, cache: self.encoderCache)[0]
+                z = self.downsample(z)
+                return self.quantizer.encode(z)
+            }
+        }
+        #endif
         encoder.resetState()
         for c in encoderCache { c.trim(c.offset)  }
 
@@ -176,6 +195,19 @@ public final class Mimi: Module {
     }
 
     public func decode(_ codes: MLXArray) -> MLXArray {
+        // S11: Mimi.decode interval (Level 2 = .operations).
+        #if MLXAUDIO_TELEMETRY_FULL
+        if Telemetry.level >= .operations {
+            return Telemetry.emitInterval(name: "Mimi.decode", family: .codecs) {
+                self.decoder.resetState()
+                for c in self.decoderCache { c.trim(c.offset) }
+                var z = self.quantizer.decode(codes)
+                z = self.upsample(z)
+                z = self.decoder_transformer(z, cache: self.decoderCache)[0]
+                return self.decoder(z)
+            }
+        }
+        #endif
         decoder.resetState()
         for c in decoderCache { c.trim(c.offset)  }
 
@@ -227,6 +259,13 @@ public final class MimiStreamingDecoder {
             let left = split(tok, indices: [t], axis: 2)
             let mid = split(left[1], indices: [1], axis: 2)[0]
             pcs.append(mimi.decodeStep(mid))
+            // S14: per-decode-step signpost (Level 4 = .verbose).
+            // One event per frame decoded; gated so it strips in release builds.
+            #if MLXAUDIO_TELEMETRY_FULL
+            if Telemetry.level >= .verbose {
+                Telemetry.emitEvent(family: .codecs, name: "Mimi.decodeStep", tokenIndex: t)
+            }
+            #endif
         }
         return concatenated(pcs, axis: 2) // [B, 1, samples]
     }
@@ -290,7 +329,22 @@ public extension Mimi {
             print("[Mimi] Updating model parameters...")
             let updateStart = CFAbsoluteTimeGetCurrent()
             let parameters = ModuleParameters.unflattened(weights)
+            // S10: Mimi loadWeights interval (Level 2 = .operations).
+            #if MLXAUDIO_TELEMETRY_FULL
+            if Telemetry.level >= .operations {
+                try Telemetry.emitInterval(
+                    name: "Mimi.loadWeights",
+                    family: .codecs,
+                    message: "mimi-pytorch-bf16"
+                ) {
+                    try model.update(parameters: parameters, verify: [.all])
+                }
+            } else {
+                try model.update(parameters: parameters, verify: [.all])
+            }
+            #else
             try model.update(parameters: parameters, verify: [.all])
+            #endif
             let updateTime = CFAbsoluteTimeGetCurrent() - updateStart
             print(String(format: "[Mimi] Model parameters updated in %.2f seconds", updateTime))
 
@@ -386,5 +440,10 @@ public final class MimiTokenizer {
     public init(_ codec: Mimi) {
         codec.train(false)
         self.codec = codec
+        Telemetry.trackLifecycle(self, className: "Mimi.Tokenizer")
+    }
+
+    deinit {
+        Telemetry.trackLifecycleEnd(className: "Mimi.Tokenizer")
     }
 }

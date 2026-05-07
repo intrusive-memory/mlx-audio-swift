@@ -44,6 +44,11 @@ public final class MarvisTTSModel: Module {
         super.init()
 
         model.resetCaches()
+        Telemetry.trackLifecycle(self, className: "MarvisTTS.Model")
+    }
+
+    deinit {
+        Telemetry.trackLifecycleEnd(className: "MarvisTTS.Model")
     }
 
     public convenience init(
@@ -215,7 +220,22 @@ public extension MarvisTTSModel {
         }
 
         let parameters = ModuleParameters.unflattened(mutableWeights)
+        // S10: MarvisTTS loadWeights interval (Level 2 = .operations).
+        #if MLXAUDIO_TELEMETRY_FULL
+        if Telemetry.level >= .operations {
+            try Telemetry.emitInterval(
+                name: "MarvisTTS.loadWeights",
+                family: .marvisTTS,
+                message: modelRepo
+            ) {
+                try model.update(parameters: parameters, verify: [.all])
+            }
+        } else {
+            try model.update(parameters: parameters, verify: [.all])
+        }
+        #else
         try model.update(parameters: parameters, verify: [.all])
+        #endif
 
         eval(model)
         return model
@@ -428,6 +448,7 @@ public extension MarvisTTSModel {
                     var currPos = expandedDimensions(MLXArray.arange(promptTokens.shape[0]), axis: 0) // [1, T]
                     var generatedCount = 0
                     var yieldedCount = 0
+                    var marvisTokenStep = 0
                     
                     let maxSeqLen = 2048 - maxAudioFrames
                     precondition(currTokens.shape[1] < maxSeqLen, "Inputs too long, must be below max_seq_len - max_audio_frames: \(maxSeqLen)")
@@ -470,7 +491,15 @@ public extension MarvisTTSModel {
                         currPos = split(currPos, indices: [currPos.shape[1] - 1], axis: 1)[1] + MLXArray(1)
                         
                         generatedCount += 1
-                        
+
+                        // S13: per-token signpost (Level 4 = .verbose). Strips in release builds.
+                        #if MLXAUDIO_TELEMETRY_FULL
+                        if Telemetry.level >= .verbose {
+                            Telemetry.emitEvent(family: .marvisTTS, name: "MarvisTTS.token", tokenIndex: marvisTokenStep)
+                        }
+                        #endif
+                        marvisTokenStep += 1
+
                         if (generatedCount - yieldedCount) >= streamingIntervalTokens {
                             yieldedCount = generatedCount
                             let gr = generateResultChunk(samplesFrames, start: startTime)
@@ -562,7 +591,41 @@ extension MarvisTTSModel: SpeechGenerationModel, @unchecked Sendable {
         instruct: String?,
         generationParameters: GenerateParameters
     ) async throws -> MLXArray {
+        // S11: MarvisTTS.generate interval (Level 2 = .operations).
+        #if MLXAUDIO_TELEMETRY_FULL
+        if Telemetry.level >= .operations {
+            return try await Telemetry.emitIntervalAsync(
+                name: "MarvisTTS.generate",
+                family: .marvisTTS,
+                message: text.prefix(64).description
+            ) {
+                try await self._marvisGenerateImpl(
+                    text: text, voice: voice, refAudio: refAudio, refText: refText,
+                    language: language, instruct: instruct,
+                    generationParameters: generationParameters
+                )
+            }
+        }
+        #endif
+        return try await _marvisGenerateImpl(
+            text: text, voice: voice, refAudio: refAudio, refText: refText,
+            language: language, instruct: instruct,
+            generationParameters: generationParameters
+        )
+    }
+
+    private func _marvisGenerateImpl(
+        text: String,
+        voice: String?,
+        refAudio: MLXArray?,
+        refText: String?,
+        language: String?,
+        instruct: String?,
+        generationParameters: GenerateParameters
+    ) async throws -> MLXArray {
         _ = generationParameters
+        _ = language
+        _ = instruct
         let resolvedVoice = try resolveVoice(from: voice)
 
         let audio = try await generate(

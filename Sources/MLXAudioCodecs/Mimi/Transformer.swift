@@ -153,7 +153,28 @@ public final class Attention: Module {
             k = rope(k, offset: cache.offset)
         }
 
+        // S14: detect KV cache capacity growth and emit a grow event at .verbose level.
+        // A grow occurs when: (a) the cache is empty (first call, keys == nil), or
+        // (b) the pre-call offset has reached the end of the currently allocated slab
+        // (offset % step == 0 && offset > 0 → next update will reallocate).
+        // Both conditions mean `KVCacheSimple.update()` will allocate a new zero-block
+        // and concatenate it. We detect condition (b) via the public `step` and `offset`
+        // properties; condition (a) is captured by offset == 0 with no prior update.
+        #if MLXAUDIO_TELEMETRY_FULL
+        let kvCacheGrowObserved: Bool = {
+            guard let simple = cache as? KVCacheSimple else { return false }
+            let prev = simple.offset
+            // Grow fires on the first call (prev == 0, keys nil) or when the slab is full.
+            return prev == 0 || (prev % simple.step == 0)
+        }()
+        #endif
         (k, v) = cache.update(keys: k, values: v)
+        // Emit the grow event AFTER update() so the new capacity is in place.
+        #if MLXAUDIO_TELEMETRY_FULL
+        if kvCacheGrowObserved && Telemetry.level >= .verbose {
+            Telemetry.emitEvent(family: .codecs, name: "Mimi.KVCache.grow", tokenIndex: cache.offset)
+        }
+        #endif
 
         let kLen = k.shape[2]
         let kTargetLen = t + min(cfg.context, kLen - t)
@@ -307,7 +328,11 @@ public final class Transformer: Module {
     }
 
     public func makeCache() -> [KVCacheSimple] {
-        return (0..<cfg.numLayers).map { _ in KVCacheSimple() }
+        return (0..<cfg.numLayers).map { _ in
+            let cache = KVCacheSimple()
+            attachKVCacheLifecycle(family: "Mimi", to: cache)
+            return cache
+        }
     }
 }
 
