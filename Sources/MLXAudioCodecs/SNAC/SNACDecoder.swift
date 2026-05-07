@@ -171,7 +171,22 @@ public class SNAC: Module {
             let snac = try fromConfig(configPath)
 
             let weights = try loadArrays(url: weightsPath)
+            // S10: SNAC loadWeights interval (Level 2 = .operations).
+            #if MLXAUDIO_TELEMETRY_FULL
+            if Telemetry.level >= .operations {
+                try Telemetry.emitInterval(
+                    name: "SNAC.loadWeights",
+                    family: .codecs,
+                    message: "snac-24khz"
+                ) {
+                    try snac.update(parameters: ModuleParameters.unflattened(weights), verify: [.all])
+                }
+            } else {
+                try snac.update(parameters: ModuleParameters.unflattened(weights), verify: [.all])
+            }
+            #else
             try snac.update(parameters: ModuleParameters.unflattened(weights), verify: [.all])
+            #endif
             eval(snac)
 
             return snac

@@ -220,7 +220,22 @@ public extension MarvisTTSModel {
         }
 
         let parameters = ModuleParameters.unflattened(mutableWeights)
+        // S10: MarvisTTS loadWeights interval (Level 2 = .operations).
+        #if MLXAUDIO_TELEMETRY_FULL
+        if Telemetry.level >= .operations {
+            try Telemetry.emitInterval(
+                name: "MarvisTTS.loadWeights",
+                family: .marvisTTS,
+                message: modelRepo
+            ) {
+                try model.update(parameters: parameters, verify: [.all])
+            }
+        } else {
+            try model.update(parameters: parameters, verify: [.all])
+        }
+        #else
         try model.update(parameters: parameters, verify: [.all])
+        #endif
 
         eval(model)
         return model

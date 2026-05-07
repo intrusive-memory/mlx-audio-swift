@@ -417,7 +417,22 @@ public final class PocketTTSModel: Module, SpeechGenerationModel, @unchecked Sen
                 flowLM: try FlowLMModel.fromConfigSync(config.flowLM, latentDim: config.mimi.quantizer.dimension, modelFolder: modelDir),
                 mimi: MimiAdapter.fromConfig(config.mimi)
             )
+            // S10: PocketTTS loadWeights interval (Level 2 = .operations).
+            #if MLXAUDIO_TELEMETRY_FULL
+            if Telemetry.level >= .operations {
+                try Telemetry.emitInterval(
+                    name: "PocketTTS.loadWeights",
+                    family: .pocketTTS,
+                    message: "pocket-tts"
+                ) {
+                    try model.update(parameters: ModuleParameters.unflattened(weights), verify: [.all])
+                }
+            } else {
+                try model.update(parameters: ModuleParameters.unflattened(weights), verify: [.all])
+            }
+            #else
             try model.update(parameters: ModuleParameters.unflattened(weights), verify: [.all])
+            #endif
             eval(model)
             return model
         }

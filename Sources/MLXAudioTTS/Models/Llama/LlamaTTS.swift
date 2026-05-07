@@ -943,7 +943,22 @@ public class LlamaTTSModel: Module, KVCacheDimensionProvider, SpeechGenerationMo
                 }
             }
 
+            // S10: LlamaTTS loadWeights interval (Level 2 = .operations).
+            #if MLXAUDIO_TELEMETRY_FULL
+            if Telemetry.level >= .operations {
+                try Telemetry.emitInterval(
+                    name: "LlamaTTS.loadWeights",
+                    family: .llamaTTS,
+                    message: "orpheus-tts-3b"
+                ) {
+                    try model.update(parameters: ModuleParameters.unflattened(sanitizedWeights), verify: [.all])
+                }
+            } else {
+                try model.update(parameters: ModuleParameters.unflattened(sanitizedWeights), verify: [.all])
+            }
+            #else
             try model.update(parameters: ModuleParameters.unflattened(sanitizedWeights), verify: [.all])
+            #endif
             eval(model)
 
             return (model, modelDir)

@@ -630,7 +630,22 @@ public class GLMASRModel: Module {
                     }
                 }
             }
+            // S10: GLMASR loadWeights interval (Level 2 = .operations).
+            #if MLXAUDIO_TELEMETRY_FULL
+            if Telemetry.level >= .operations {
+                try Telemetry.emitInterval(
+                    name: "GLMASR.loadWeights",
+                    family: .glmASR,
+                    message: "glm-asr"
+                ) {
+                    try model.update(parameters: ModuleParameters.unflattened(sanitizedWeights), verify: [.all])
+                }
+            } else {
+                try model.update(parameters: ModuleParameters.unflattened(sanitizedWeights), verify: [.all])
+            }
+            #else
             try model.update(parameters: ModuleParameters.unflattened(sanitizedWeights), verify: [.all])
+            #endif
 
             eval(model)
 

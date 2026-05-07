@@ -421,7 +421,22 @@ public class DACVAE: Module {
             // Load weights
             let weightsURL = modelURL.appendingPathComponent("model.safetensors")
             let weights = try loadArrays(url: weightsURL)
+            // S10: DACVAE loadWeights interval (Level 2 = .operations).
+            #if MLXAUDIO_TELEMETRY_FULL
+            if Telemetry.level >= .operations {
+                try Telemetry.emitInterval(
+                    name: "DACVAE.loadWeights",
+                    family: .codecs,
+                    message: "dac-vae"
+                ) {
+                    try model.update(parameters: ModuleParameters.unflattened(weights), verify: .noUnusedKeys)
+                }
+            } else {
+                try model.update(parameters: ModuleParameters.unflattened(weights), verify: .noUnusedKeys)
+            }
+            #else
             try model.update(parameters: ModuleParameters.unflattened(weights), verify: .noUnusedKeys)
+            #endif
 
             eval(model.parameters())
 

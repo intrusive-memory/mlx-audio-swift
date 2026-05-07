@@ -572,7 +572,22 @@ public class Qwen3ForcedAlignerModel: Module {
                 }
             }
 
+            // S10: Qwen3ForcedAligner loadWeights interval (Level 2).
+            #if MLXAUDIO_TELEMETRY_FULL
+            if Telemetry.level >= .operations {
+                try Telemetry.emitInterval(
+                    name: "Qwen3ForcedAligner.loadWeights",
+                    family: .qwen3ASR,
+                    message: "qwen3-asr-forced-aligner"
+                ) {
+                    try model.update(parameters: ModuleParameters.unflattened(sanitizedWeights), verify: [.all])
+                }
+            } else {
+                try model.update(parameters: ModuleParameters.unflattened(sanitizedWeights), verify: [.all])
+            }
+            #else
             try model.update(parameters: ModuleParameters.unflattened(sanitizedWeights), verify: [.all])
+            #endif
             eval(model)
 
             return (model, modelDir)

@@ -903,7 +903,22 @@ public class SopranoModel: Module, KVCacheDimensionProvider, SpeechGenerationMod
                 }
             }
 
+            // S10: SopranoTTS loadWeights interval (Level 2 = .operations).
+            #if MLXAUDIO_TELEMETRY_FULL
+            if Telemetry.level >= .operations {
+                try Telemetry.emitInterval(
+                    name: "SopranoTTS.loadWeights",
+                    family: .sopranoTTS,
+                    message: "soprano-tts-80m"
+                ) {
+                    try model.update(parameters: ModuleParameters.unflattened(sanitizedWeights), verify: [.all])
+                }
+            } else {
+                try model.update(parameters: ModuleParameters.unflattened(sanitizedWeights), verify: [.all])
+            }
+            #else
             try model.update(parameters: ModuleParameters.unflattened(sanitizedWeights), verify: [.all])
+            #endif
             eval(model)
 
             return (model, modelDir)

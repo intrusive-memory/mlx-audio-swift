@@ -699,6 +699,35 @@ public enum AudioModelManager {
     // Trigger registration if not already done
     ensureComponentsRegistered()
 
+    // S10 Sortie 10: ModelResolver.resolve interval (Level 2 = .operations).
+    // Two-layer gate: `#if MLXAUDIO_TELEMETRY_FULL` strips at lower compile
+    // ceilings, `if Telemetry.level >= .operations` strips when an env-var
+    // floor keeps us at .lifecycle. The wrapped Acervo.ensureComponentReady
+    // call is also wrapped below as the per-component "Acervo.download"
+    // interval; both intervals share the modelResolver subsystem so
+    // Instruments groups them under one lane.
+    #if MLXAUDIO_TELEMETRY_FULL
+    if Telemetry.level >= .operations {
+      try await Telemetry.emitIntervalAsync(
+        name: "ModelResolver.resolve",
+        family: .modelResolver,
+        message: modelRepo.rawValue
+      ) {
+        try await Telemetry.emitIntervalAsync(
+          name: "Acervo.download",
+          family: .modelResolver,
+          message: modelRepo.componentId
+        ) {
+          try await Acervo.ensureComponentReady(
+            modelRepo.componentId,
+            progress: progress
+          )
+        }
+      }
+      return
+    }
+    #endif
+
     // Use Acervo to ensure component is downloaded and ready
     try await Acervo.ensureComponentReady(
       modelRepo.componentId,
@@ -807,7 +836,26 @@ public enum AudioModelManager {
       throw AcervoError.componentNotRegistered(componentId)
     }
 
+    // S10 Sortie 10: Acervo.download per-component interval (Level 2 =
+    // .operations). Wraps the network/disk download phase only; the
+    // synchronous `load` closure that follows runs the model construction
+    // and weight load — those are wrapped at their own call sites in each
+    // model family.
+    #if MLXAUDIO_TELEMETRY_FULL
+    if Telemetry.level >= .operations {
+      try await Telemetry.emitIntervalAsync(
+        name: "Acervo.download",
+        family: .modelResolver,
+        message: componentId
+      ) {
+        try await Acervo.ensureComponentReady(componentId)
+      }
+    } else {
+      try await Acervo.ensureComponentReady(componentId)
+    }
+    #else
     try await Acervo.ensureComponentReady(componentId)
+    #endif
 
     // REQUIREMENTS.md:86 — `load` runs inside `withComponentAccess` so locking
     // and SHA verification cannot be bypassed. SwiftAcervo's `perform:` closure

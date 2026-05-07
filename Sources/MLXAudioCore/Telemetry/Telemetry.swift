@@ -51,8 +51,18 @@ public enum Telemetry {
     ///
     /// The resolved value is cached on first access; subsequent reads
     /// are O(1) and safe for hot-path use.
+    ///
+    /// Under `MLXAUDIO_TELEMETRY_FULL` (debug + tests), tests may install
+    /// a temporary override via `Telemetry._installLevelOverride(_:)` to
+    /// exercise level-gated code paths without depending on env-var
+    /// resolution timing — see `IntervalEmitter.swift`.
     public static var level: Level {
-        ResolvedLevel.shared.level
+        #if MLXAUDIO_TELEMETRY_FULL
+        if let override = Telemetry._levelOverride {
+            return override
+        }
+        #endif
+        return ResolvedLevel.shared.level
     }
 
     // MARK: - Public snapshot / reset API (S4)

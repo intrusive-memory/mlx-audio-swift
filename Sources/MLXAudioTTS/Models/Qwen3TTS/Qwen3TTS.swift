@@ -1641,7 +1641,22 @@ public final class Qwen3TTSModel: Module, SpeechGenerationModel, @unchecked Send
             // Sanitize and load talker weights
             let talkerWeights = Qwen3TTSTalkerForConditionalGeneration.sanitize(weights: allWeights)
             let talkerPairs = talkerWeights.map { ($0.key, $0.value) }
+            // S10: Qwen3TTS talker loadWeights interval (Level 2 = .operations).
+            #if MLXAUDIO_TELEMETRY_FULL
+            if Telemetry.level >= .operations {
+                try Telemetry.emitInterval(
+                    name: "Qwen3TTS.loadWeights",
+                    family: .qwen3TTS,
+                    message: "talker"
+                ) {
+                    try model.talker.update(parameters: ModuleParameters.unflattened(talkerPairs), verify: .noUnusedKeys)
+                }
+            } else {
+                try model.talker.update(parameters: ModuleParameters.unflattened(talkerPairs), verify: .noUnusedKeys)
+            }
+            #else
             try model.talker.update(parameters: ModuleParameters.unflattened(talkerPairs), verify: .noUnusedKeys)
+            #endif
             eval(model.talker.parameters())
 
             // Generate tokenizer.json if missing (Qwen3-TTS ships without it)
@@ -1691,7 +1706,22 @@ public final class Qwen3TTSModel: Module, SpeechGenerationModel, @unchecked Send
                 let sanitizedWeights = Qwen3TTSSpeakerEncoder.sanitize(weights: allWeights)
                 if !sanitizedWeights.isEmpty {
                     let pairs = sanitizedWeights.map { ($0.key, $0.value) }
+                    // S10: Qwen3TTS speakerEncoder loadWeights interval (Level 2).
+                    #if MLXAUDIO_TELEMETRY_FULL
+                    if Telemetry.level >= .operations {
+                        try Telemetry.emitInterval(
+                            name: "Qwen3TTS.loadWeights",
+                            family: .qwen3TTS,
+                            message: "speakerEncoder"
+                        ) {
+                            try speakerEncoder.update(parameters: ModuleParameters.unflattened(pairs), verify: .noUnusedKeys)
+                        }
+                    } else {
+                        try speakerEncoder.update(parameters: ModuleParameters.unflattened(pairs), verify: .noUnusedKeys)
+                    }
+                    #else
                     try speakerEncoder.update(parameters: ModuleParameters.unflattened(pairs), verify: .noUnusedKeys)
+                    #endif
                     eval(speakerEncoder.parameters())
                     model.speakerEncoder = speakerEncoder
                     print("Loaded speaker encoder (\(speakerEncoderConfig.encDim)-dim)")
@@ -1739,7 +1769,22 @@ public final class Qwen3TTSModel: Module, SpeechGenerationModel, @unchecked Send
         if !tokenizerWeights.isEmpty {
             let sanitized = Qwen3TTSSpeechTokenizer.sanitize(weights: tokenizerWeights)
             let pairs = sanitized.map { ($0.key, $0.value) }
+            // S10: Qwen3TTS speechTokenizer loadWeights interval (Level 2).
+            #if MLXAUDIO_TELEMETRY_FULL
+            if Telemetry.level >= .operations {
+                try Telemetry.emitInterval(
+                    name: "Qwen3TTS.loadWeights",
+                    family: .qwen3TTS,
+                    message: "speechTokenizer"
+                ) {
+                    try speechTokenizer.update(parameters: ModuleParameters.unflattened(pairs), verify: .noUnusedKeys)
+                }
+            } else {
+                try speechTokenizer.update(parameters: ModuleParameters.unflattened(pairs), verify: .noUnusedKeys)
+            }
+            #else
             try speechTokenizer.update(parameters: ModuleParameters.unflattened(pairs), verify: .noUnusedKeys)
+            #endif
             eval(speechTokenizer.parameters())
         }
 

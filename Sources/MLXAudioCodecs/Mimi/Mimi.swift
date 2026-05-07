@@ -296,7 +296,22 @@ public extension Mimi {
             print("[Mimi] Updating model parameters...")
             let updateStart = CFAbsoluteTimeGetCurrent()
             let parameters = ModuleParameters.unflattened(weights)
+            // S10: Mimi loadWeights interval (Level 2 = .operations).
+            #if MLXAUDIO_TELEMETRY_FULL
+            if Telemetry.level >= .operations {
+                try Telemetry.emitInterval(
+                    name: "Mimi.loadWeights",
+                    family: .codecs,
+                    message: "mimi-pytorch-bf16"
+                ) {
+                    try model.update(parameters: parameters, verify: [.all])
+                }
+            } else {
+                try model.update(parameters: parameters, verify: [.all])
+            }
+            #else
             try model.update(parameters: parameters, verify: [.all])
+            #endif
             let updateTime = CFAbsoluteTimeGetCurrent() - updateStart
             print(String(format: "[Mimi] Model parameters updated in %.2f seconds", updateTime))
 

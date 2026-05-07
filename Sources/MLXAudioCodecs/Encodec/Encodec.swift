@@ -435,7 +435,24 @@ public class Encodec: Module {
             // Load weights
             let weightsURL = modelURL.appendingPathComponent("model.safetensors")
             let weights = try loadArrays(url: weightsURL)
+            // S10: Encodec loadWeights interval (Level 2 = .operations). Vocos
+            // composes Encodec for its feature extractor, so the Vocos
+            // load path's weight load is captured here too.
+            #if MLXAUDIO_TELEMETRY_FULL
+            if Telemetry.level >= .operations {
+                try Telemetry.emitInterval(
+                    name: "Encodec.loadWeights",
+                    family: .codecs,
+                    message: componentId
+                ) {
+                    try model.update(parameters: ModuleParameters.unflattened(weights), verify: .noUnusedKeys)
+                }
+            } else {
+                try model.update(parameters: ModuleParameters.unflattened(weights), verify: .noUnusedKeys)
+            }
+            #else
             try model.update(parameters: ModuleParameters.unflattened(weights), verify: .noUnusedKeys)
+            #endif
 
             return model
         }

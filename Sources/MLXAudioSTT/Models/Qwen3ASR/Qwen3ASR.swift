@@ -1595,7 +1595,22 @@ public class Qwen3ASRModel: Module {
             }
 
             // Load weights into model
+            // S10: Qwen3ASR loadWeights interval (Level 2 = .operations).
+            #if MLXAUDIO_TELEMETRY_FULL
+            if Telemetry.level >= .operations {
+                try Telemetry.emitInterval(
+                    name: "Qwen3ASR.loadWeights",
+                    family: .qwen3ASR,
+                    message: "qwen3-asr"
+                ) {
+                    try model.update(parameters: ModuleParameters.unflattened(sanitizedWeights), verify: [.all])
+                }
+            } else {
+                try model.update(parameters: ModuleParameters.unflattened(sanitizedWeights), verify: [.all])
+            }
+            #else
             try model.update(parameters: ModuleParameters.unflattened(sanitizedWeights), verify: [.all])
+            #endif
             eval(model)
 
             return (model, modelDir)
