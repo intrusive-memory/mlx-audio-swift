@@ -528,7 +528,9 @@ public class Qwen3Model: Module, KVCacheDimensionProvider, SpeechGenerationModel
 
     public func makeCache() -> [KVCache] {
         return (0..<self.configuration.hiddenLayers).map { _ in
-            KVCacheSimple()
+            let cache = KVCacheSimple()
+            attachKVCacheLifecycle(family: "Qwen3", to: cache)
+            return cache
         }
     }
 

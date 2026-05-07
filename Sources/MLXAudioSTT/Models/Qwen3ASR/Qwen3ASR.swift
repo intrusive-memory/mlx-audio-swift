@@ -955,7 +955,9 @@ public class Qwen3ASRModel: Module {
 
     public func makeCache() -> [KVCache] {
         return (0..<config.textConfig.numHiddenLayers).map { _ in
-            KVCacheSimple()
+            let cache = KVCacheSimple()
+            attachKVCacheLifecycle(family: "Qwen3ASR", to: cache)
+            return cache
         }
     }
 

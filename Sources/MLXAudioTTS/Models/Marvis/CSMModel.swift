@@ -1,6 +1,7 @@
 
 import Foundation
 import MLX
+import MLXAudioCore
 import MLXLMCommon
 import MLXNN
 import Tokenizers
@@ -460,6 +461,8 @@ public final class CSMModel: Module {
     public func resetCaches() {
         backboneCache = makePromptCache(model: backbone, parameters: nil) as? [KVCacheSimple]
         decoderCache = makePromptCache(model: decoder, parameters: nil) as? [KVCacheSimple]
+        backboneCache?.forEach { attachKVCacheLifecycle(family: "MarvisTTS", to: $0) }
+        decoderCache?.forEach { attachKVCacheLifecycle(family: "MarvisTTS", to: $0) }
         cachesEnabled = true
     }
 
@@ -498,6 +501,7 @@ public final class CSMModel: Module {
         var currPos = repeated(basePos, count: B, axis: 0) // [B, 2]
 
         decoderCache = makePromptCache(model: decoder, parameters: nil) as? [KVCacheSimple]
+        decoderCache?.forEach { attachKVCacheLifecycle(family: "MarvisTTS", to: $0) }
 
         let Cb = maxCodebooks != nil ? min(args.audioNumCodebooks, maxCodebooks ?? args.audioNumCodebooks) : args.audioNumCodebooks
         if Cb > 1 {

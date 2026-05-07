@@ -511,7 +511,9 @@ public class GLMASRModel: Module {
     /// Create KV cache for generation.
     public func makeCache() -> [KVCache] {
         return (0..<config.lmConfig.numHiddenLayers).map { _ in
-            KVCacheSimple()
+            let cache = KVCacheSimple()
+            attachKVCacheLifecycle(family: "GLMASR", to: cache)
+            return cache
         }
     }
 

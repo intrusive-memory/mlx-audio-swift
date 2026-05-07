@@ -307,7 +307,11 @@ public final class Transformer: Module {
     }
 
     public func makeCache() -> [KVCacheSimple] {
-        return (0..<cfg.numLayers).map { _ in KVCacheSimple() }
+        return (0..<cfg.numLayers).map { _ in
+            let cache = KVCacheSimple()
+            attachKVCacheLifecycle(family: "Mimi", to: cache)
+            return cache
+        }
     }
 }
 

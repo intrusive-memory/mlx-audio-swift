@@ -264,7 +264,9 @@ public class SopranoModel: Module, KVCacheDimensionProvider, SpeechGenerationMod
 
     public func makeCache() -> [KVCache] {
         return (0..<configuration.hiddenLayers).map { _ in
-            KVCacheSimple()
+            let cache = KVCacheSimple()
+            attachKVCacheLifecycle(family: "SopranoTTS", to: cache)
+            return cache
         }
     }
 

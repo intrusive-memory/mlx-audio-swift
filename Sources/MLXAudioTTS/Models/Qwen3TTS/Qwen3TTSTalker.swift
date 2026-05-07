@@ -4,6 +4,7 @@
 @preconcurrency import MLX
 import MLXNN
 @preconcurrency import MLXLMCommon
+import MLXAudioCore
 import Foundation
 
 // MARK: - RoPE helpers
@@ -302,7 +303,11 @@ final class Qwen3TTSTalkerModel: Module {
     }
 
     func makeCache() -> [any KVCache] {
-        layers.map { _ in KVCacheSimple() }
+        layers.map { _ in
+            let cache = KVCacheSimple()
+            attachKVCacheLifecycle(family: "Qwen3TTS", to: cache)
+            return cache
+        }
     }
 }
 

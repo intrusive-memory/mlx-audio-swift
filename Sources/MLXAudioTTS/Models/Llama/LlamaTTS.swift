@@ -592,7 +592,9 @@ public class LlamaTTSModel: Module, KVCacheDimensionProvider, SpeechGenerationMo
 
     public func makeCache() -> [KVCache] {
         return (0..<configuration.hiddenLayers).map { _ in
-            KVCacheSimple()
+            let cache = KVCacheSimple()
+            attachKVCacheLifecycle(family: "LlamaTTS", to: cache)
+            return cache
         }
     }
 
