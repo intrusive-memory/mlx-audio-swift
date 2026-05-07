@@ -180,6 +180,12 @@ public class Encodec: Module {
         self._encoder.wrappedValue = EncodecEncoder(config: config)
         self._decoder.wrappedValue = EncodecDecoder(config: config)
         self._quantizer.wrappedValue = EncodecResidualVectorQuantizer(config: config)
+        super.init()
+        Telemetry.trackLifecycle(self, className: "Encodec.Model")
+    }
+
+    deinit {
+        Telemetry.trackLifecycleEnd(className: "Encodec.Model")
     }
 
     // MARK: - Properties

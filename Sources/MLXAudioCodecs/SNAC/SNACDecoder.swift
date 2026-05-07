@@ -80,6 +80,12 @@ public class SNAC: Module {
             depthwise: depthwise,
             attnWindowSize: attnWindowSize
         )
+        super.init()
+        Telemetry.trackLifecycle(self, className: "SNAC.Model")
+    }
+
+    deinit {
+        Telemetry.trackLifecycleEnd(className: "SNAC.Model")
     }
 
     public func preprocess(_ audioData: MLXArray) -> MLXArray {

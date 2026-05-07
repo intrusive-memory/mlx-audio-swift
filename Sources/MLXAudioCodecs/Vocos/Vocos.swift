@@ -7,6 +7,7 @@
 
 import Foundation
 import MLX
+import MLXAudioCore
 import MLXNN
 
 // MARK: - AdaLayerNorm
@@ -293,6 +294,12 @@ public class Vocos: Module {
     ) {
         self._backbone.wrappedValue = backbone
         self._head.wrappedValue = head
+        super.init()
+        Telemetry.trackLifecycle(self, className: "Vocos.Model")
+    }
+
+    deinit {
+        Telemetry.trackLifecycleEnd(className: "Vocos.Model")
     }
 
     /// Decode features to audio waveform.

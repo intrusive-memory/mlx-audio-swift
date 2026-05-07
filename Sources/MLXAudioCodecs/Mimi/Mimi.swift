@@ -153,6 +153,12 @@ public final class Mimi: Module {
 
         self.encoderCache = _encoder_transformer.wrappedValue.makeCache()
         self.decoderCache = _decoder_transformer.wrappedValue.makeCache()
+        super.init()
+        Telemetry.trackLifecycle(self, className: "Mimi.Model")
+    }
+
+    deinit {
+        Telemetry.trackLifecycleEnd(className: "Mimi.Model")
     }
 
     public func resetState() {

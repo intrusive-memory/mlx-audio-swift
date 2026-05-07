@@ -256,6 +256,12 @@ public class DACVAE: Module {
             channels: config.decoderDim,
             rates: config.decoderRates
         )
+        super.init()
+        Telemetry.trackLifecycle(self, className: "DAC.Model")
+    }
+
+    deinit {
+        Telemetry.trackLifecycleEnd(className: "DAC.Model")
     }
 
     /// Pad waveform to be divisible by hop_length.
