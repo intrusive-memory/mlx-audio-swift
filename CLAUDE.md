@@ -2,6 +2,11 @@
 
 Read and follow all instructions in [AGENTS.md](AGENTS.md) before starting any task. App Group configuration (required for SwiftAcervo model storage) is documented in [AGENTS.md § App Group configuration](AGENTS.md#app-group-configuration-required).
 
+## References
+
+- **Telemetry**: see [docs/TELEMETRY_USAGE.md](docs/TELEMETRY_USAGE.md) for level/env-var/Instruments examples.
+- Full telemetry specification: [docs/TELEMETRY_REQUIREMENTS.md](docs/TELEMETRY_REQUIREMENTS.md)
+
 ## Additional Rules for Claude
 
 - **Never use `swift build` or `swift test`**. Always use `xcodebuild` with `-scheme MLXAudio-Package -destination 'platform=macOS'`.
