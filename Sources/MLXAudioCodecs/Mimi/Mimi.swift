@@ -259,6 +259,13 @@ public final class MimiStreamingDecoder {
             let left = split(tok, indices: [t], axis: 2)
             let mid = split(left[1], indices: [1], axis: 2)[0]
             pcs.append(mimi.decodeStep(mid))
+            // S14: per-decode-step signpost (Level 4 = .verbose).
+            // One event per frame decoded; gated so it strips in release builds.
+            #if MLXAUDIO_TELEMETRY_FULL
+            if Telemetry.level >= .verbose {
+                Telemetry.emitEvent(family: .codecs, name: "Mimi.decodeStep", tokenIndex: t)
+            }
+            #endif
         }
         return concatenated(pcs, axis: 2) // [B, 1, samples]
     }
