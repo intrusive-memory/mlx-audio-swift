@@ -76,9 +76,7 @@ let package = Package(
             .upToNextMajor(from: "0.31.3")),
         .package(url: "https://github.com/ml-explore/mlx-swift-lm.git",
             .upToNextMajor(from: "3.31.3")),
-        // swift-tokenizers-mlx 0.3.0+ and swift-tokenizers 0.5.0+ are Swift-only; no traits needed.
-        .package(url: "https://github.com/DePasqualeOrg/swift-tokenizers-mlx",
-            .upToNextMajor(from: "0.3.0")),
+        // swift-tokenizers 0.5.0+ is Swift-only; no traits needed.
         .package(url: "https://github.com/DePasqualeOrg/swift-tokenizers.git",
             .upToNextMajor(from: "0.5.0")),
         sibling(
@@ -149,7 +147,6 @@ let package = Package(
                 .product(name: "MLXLMCommon", package: "mlx-swift-lm"),
                 .product(name: "MLXLLM", package: "mlx-swift-lm"),
                 .product(name: "SwiftAcervo", package: "SwiftAcervo"),
-                .product(name: "MLXLMTokenizers", package: "swift-tokenizers-mlx"),
                 .product(name: "Tokenizers", package: "swift-tokenizers"),
                 // Transitive dependencies for MLXLMCommon
                 .product(name: "Numerics", package: "swift-numerics"),
@@ -175,7 +172,6 @@ let package = Package(
                 .product(name: "MLXLMCommon", package: "mlx-swift-lm"),
                 .product(name: "MLXLLM", package: "mlx-swift-lm"),
                 .product(name: "SwiftAcervo", package: "SwiftAcervo"),
-                .product(name: "MLXLMTokenizers", package: "swift-tokenizers-mlx"),
                 .product(name: "Tokenizers", package: "swift-tokenizers"),
                 // Transitive dependencies for MLXLMCommon
                 .product(name: "Numerics", package: "swift-numerics"),
