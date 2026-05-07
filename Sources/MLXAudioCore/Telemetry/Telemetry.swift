@@ -55,6 +55,72 @@ public enum Telemetry {
         ResolvedLevel.shared.level
     }
 
+    // MARK: - Public snapshot / reset API (S4)
+
+    /// Snapshot of live object counts and MLX memory state.
+    ///
+    /// Forwards to the actor-backed `CounterStore.shared`. Reads
+    /// `MLX.Memory.activeMemory` and bumps `mlxPeakBytes` to the
+    /// process-lifetime high-water mark before returning. Safe to call
+    /// from any isolation context.
+    public static func snapshot() async -> TelemetrySnapshot {
+        await CounterStore.shared.snapshot()
+    }
+
+    /// Zero live-object counts and per-op deltas. **Preserves**
+    /// `mlxPeakBytes` per requirements §9 — the peak is process-lifetime
+    /// monotonic across resets so leak-detection tests can still observe
+    /// the worst-case footprint after iterating.
+    public static func resetCounters() async {
+        await CounterStore.shared.reset()
+    }
+
+    // MARK: - Internal lifecycle hook (S4 — used by WU-2)
+
+    // trackLifecycle uses a detached fire-and-forget Task so init / deinit do not block on the actor.
+    /// Internal lifecycle helper used by WU-2's instrumented
+    /// `init` / `deinit` call sites.
+    ///
+    /// **Fire-and-forget contract**: this function spawns a detached
+    /// `Task` that calls `CounterStore.shared.increment(className:)` and
+    /// returns synchronously. The caller does **not** await the
+    /// increment. Pair this with a `trackLifecycleEnd(className:)` call
+    /// in `deinit`.
+    ///
+    /// The `instance` parameter is captured only by reference identity —
+    /// we do not retain it. It exists to make future per-instance
+    /// signpost IDs trivial to add (S5+) without changing the call
+    /// signature.
+    ///
+    /// No-op when `Telemetry.level == .off` — gated cheaply on the
+    /// caller side too via the early-return inside `CounterStore.increment`.
+    internal static func trackLifecycle(_ instance: AnyObject, className: String) {
+        _ = instance // capture-by-reference only; no retention
+        guard level != .off else { return }
+        Task.detached(priority: .background) {
+            await CounterStore.shared.increment(className: className)
+        }
+    }
+
+    // trackLifecycleEnd uses a detached fire-and-forget Task so deinit does not block on the actor.
+    /// Internal lifecycle helper paired with `trackLifecycle(_:className:)`.
+    ///
+    /// **Fire-and-forget contract**: this function spawns a detached
+    /// `Task` that calls `CounterStore.shared.decrement(className:)` and
+    /// returns synchronously. Call this from `deinit`.
+    ///
+    /// `deinit` cannot capture `self` for use after deallocation, so this
+    /// function takes only the `className` — no `AnyObject`. The class
+    /// label is the link between `trackLifecycle` and `trackLifecycleEnd`.
+    ///
+    /// No-op when `Telemetry.level == .off`.
+    internal static func trackLifecycleEnd(className: String) {
+        guard level != .off else { return }
+        Task.detached(priority: .background) {
+            await CounterStore.shared.decrement(className: className)
+        }
+    }
+
     // MARK: - Internal: resolution & testability hooks
 
     /// Pure resolver used by both the cached `Telemetry.level` accessor
