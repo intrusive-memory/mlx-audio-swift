@@ -98,6 +98,27 @@ public func mimi_202407(numCodebooks: Int) -> MimiConfig {
 
 // MARK: - Mimi
 
+/// Mimi neural audio codec.
+///
+/// ## Telemetry
+///
+/// Attach a reporter via ``setTelemetry(_:)`` to receive
+/// ``MLXAudioTelemetryEvent/codecEncodeStart(codec:inputSamples:)`` /
+/// ``MLXAudioTelemetryEvent/codecEncodeComplete(codec:durationSeconds:compressionRatio:)`` and
+/// ``MLXAudioTelemetryEvent/codecDecodeStart(codec:codedFrames:)`` /
+/// ``MLXAudioTelemetryEvent/codecDecodeComplete(codec:durationSeconds:outputSamples:)``
+/// (and ``MLXAudioTelemetryEvent/codecError(codec:operation:error:)`` on failure)
+/// at the public encode/decode boundaries.
+///
+/// Use the async overloads ``encode(_:)`` (async), ``decode(_:)`` (async),
+/// and ``encodeStep(_:)`` (async) to get telemetry emission;
+/// the synchronous overloads are retained for backward-compatible callers.
+///
+/// For streaming decode through ``MimiStreamingDecoder``, call
+/// ``MimiStreamingDecoder/setTelemetry(_:)`` on the streaming decoder — it
+/// emits ``codecDecodeStart`` / ``codecDecodeComplete`` once per
+/// ``MimiStreamingDecoder/decodeFrames(_:)`` call (never inside the per-frame
+/// loop).
 public final class Mimi: Module {
     public let cfg: MimiConfig
 
@@ -115,6 +136,32 @@ public final class Mimi: Module {
     public private(set) var decoderCache: [KVCache]
 
     private let downsampleStride: Int
+
+    // MARK: - Telemetry
+
+    /// Optional vendor-neutral telemetry reporter. `nil` by default — zero
+    /// overhead when no reporter is attached.
+    private var telemetry: (any MLXAudioTelemetryReporter)?
+
+    /// Attach or detach a telemetry reporter.
+    ///
+    /// Set to `nil` (the default) to disable telemetry entirely. Setting a
+    /// reporter enables ``MLXAudioTelemetryEvent`` emission at every public
+    /// encode/decode boundary.
+    public func setTelemetry(_ reporter: (any MLXAudioTelemetryReporter)?) {
+        self.telemetry = reporter
+    }
+
+    /// Canonical per-instance emit helper (copied verbatim from
+    /// `MLXAudioTelemetryReporter.swift` doc comment).
+    ///
+    /// The `@autoclosure` is load-bearing: when `telemetry` is `nil` the
+    /// closure is never evaluated, so payload-construction work (shape
+    /// reads, multiplications) is completely elided.
+    private func emit(_ event: @autoclosure () -> MLXAudioTelemetryEvent) async {
+        guard let telemetry else { return }
+        await telemetry.capture(event())
+    }
 
     public init(cfg: MimiConfig) {
         self.cfg = cfg
@@ -171,6 +218,11 @@ public final class Mimi: Module {
     public var frameRate: Double { cfg.frameRate }
     public var sampleRate: Double { cfg.sampleRate }
 
+    /// Encodes the input audio waveform into discrete codes (synchronous overload).
+    ///
+    /// This overload is retained for backward compatibility with existing
+    /// synchronous callers. No public-surface telemetry is emitted from
+    /// this path — use the `async` overload if you need telemetry.
     public func encode(_ xs: MLXArray) -> MLXArray {
         // S11: Mimi.encode interval (Level 2 = .operations).
         #if MLXAUDIO_TELEMETRY_FULL
@@ -194,6 +246,62 @@ public final class Mimi: Module {
         return quantizer.encode(z) // [B, nq, Tq]
     }
 
+    /// Encodes the input audio waveform into discrete codes with telemetry emission.
+    ///
+    /// Emits ``MLXAudioTelemetryEvent/codecEncodeStart(codec:inputSamples:)``
+    /// before encoding, then
+    /// ``MLXAudioTelemetryEvent/codecEncodeComplete(codec:durationSeconds:compressionRatio:)``
+    /// on success.
+    ///
+    /// `inputSamples` is the time-dimension of `xs` (last dimension of `[B, C, T]`).
+    /// `compressionRatio` = `Double(inputBytes) / Double(outputBytes)` where
+    /// `inputBytes` = time-samples × channels × 4 (Float32) and
+    /// `outputBytes` = total quantized code elements × 4 (Int32 indices).
+    ///
+    /// Telemetry emission is a boundary-level operation — no events are emitted
+    /// inside the encoder transformer layers.
+    public func encode(_ xs: MLXArray) async -> MLXArray {
+        // inputSamples: last dimension of [B, C, T].
+        let inputSamples: Int = xs.ndim >= 1 ? xs.shape[xs.ndim - 1] : 0
+        let inputChannels: Int = xs.ndim >= 2 ? xs.shape[xs.ndim - 2] : 1
+
+        await emit(.codecEncodeStart(codec: "mimi", inputSamples: inputSamples))
+
+        let start = Date()
+        // Bind to a sync function type so overload resolution picks the
+        // non-async `encode`; from an async context Swift otherwise prefers
+        // the async overload, which would recurse into this method.
+        let syncEncode: (MLXArray) -> MLXArray = self.encode
+        let result = syncEncode(xs)
+        let elapsed = Date().timeIntervalSince(start)
+
+        let inputBytes = inputSamples * inputChannels * 4 // Float32
+        let outputElements = result.shape.reduce(1, *)
+        let outputBytes = outputElements * 4 // Int32 indices
+
+        if inputBytes > 0 && outputBytes > 0 {
+            let compressionRatio = Double(inputBytes) / Double(outputBytes)
+            await emit(.codecEncodeComplete(
+                codec: "mimi",
+                durationSeconds: elapsed,
+                compressionRatio: compressionRatio
+            ))
+        } else {
+            await emit(.codecError(
+                codec: "mimi",
+                operation: "encode",
+                error: "compressionRatio unavailable: inputBytes=\(inputBytes) outputBytes=\(outputBytes)"
+            ))
+        }
+
+        return result
+    }
+
+    /// Decodes discrete codes into an audio waveform (synchronous overload).
+    ///
+    /// This overload is retained for backward compatibility with existing
+    /// synchronous callers. No public-surface telemetry is emitted from
+    /// this path — use the `async` overload if you need telemetry.
     public func decode(_ codes: MLXArray) -> MLXArray {
         // S11: Mimi.decode interval (Level 2 = .operations).
         #if MLXAUDIO_TELEMETRY_FULL
@@ -217,6 +325,49 @@ public final class Mimi: Module {
         return decoder(z) // [B, 1, T]
     }
 
+    /// Decodes discrete codes into an audio waveform with telemetry emission.
+    ///
+    /// Emits ``MLXAudioTelemetryEvent/codecDecodeStart(codec:codedFrames:)``
+    /// before decoding, then
+    /// ``MLXAudioTelemetryEvent/codecDecodeComplete(codec:durationSeconds:outputSamples:)``
+    /// on success.
+    ///
+    /// `codedFrames` is the last dimension of the `codes` tensor (the Tq
+    /// quantized-frame dimension of `[B, nq, Tq]`).
+    /// `outputSamples` is the last dimension of the decoded audio waveform
+    /// (`[B, 1, T]` → `T`).
+    ///
+    /// Telemetry emission is a boundary-level operation — no events are emitted
+    /// inside the decoder transformer layers.
+    public func decode(_ codes: MLXArray) async -> MLXArray {
+        // codedFrames: last dimension of [B, nq, Tq].
+        let codedFrames: Int = codes.ndim >= 1 ? codes.shape[codes.ndim - 1] : 0
+
+        await emit(.codecDecodeStart(codec: "mimi", codedFrames: codedFrames))
+
+        let start = Date()
+        // See `encode(_:) async` for why we bind to a sync function type.
+        let syncDecode: (MLXArray) -> MLXArray = self.decode
+        let audioValues = syncDecode(codes)
+        let elapsed = Date().timeIntervalSince(start)
+
+        // outputSamples: last dimension of [B, 1, T].
+        let outputSamples: Int = audioValues.ndim >= 1 ? audioValues.shape[audioValues.ndim - 1] : 0
+
+        await emit(.codecDecodeComplete(
+            codec: "mimi",
+            durationSeconds: elapsed,
+            outputSamples: outputSamples
+        ))
+
+        return audioValues
+    }
+
+    /// Streams one audio chunk through the encoder (synchronous overload).
+    ///
+    /// This overload is retained for backward compatibility with existing callers
+    /// (e.g. Marvis's `encodeChunked`). No public-surface telemetry is emitted
+    /// from this path — use the `async` overload if you need telemetry.
     public func encodeStep(_ xs: MLXArray) -> MLXArray {
         var z = encoder.step(xs)
         z = encoder_transformer(z, cache: encoderCache)[0]
@@ -225,6 +376,56 @@ public final class Mimi: Module {
         return z
     }
 
+    /// Streams one audio chunk through the encoder with telemetry emission.
+    ///
+    /// Emits ``MLXAudioTelemetryEvent/codecEncodeStart(codec:inputSamples:)``
+    /// before encoding the chunk, then
+    /// ``MLXAudioTelemetryEvent/codecEncodeComplete(codec:durationSeconds:compressionRatio:)``
+    /// on success.
+    ///
+    /// This is the streaming-encode boundary called by Marvis's `encodeChunked`
+    /// helper. Each chunk invocation emits one start+complete pair — there is no
+    /// per-frame emission inside this method.
+    public func encodeStep(_ xs: MLXArray) async -> MLXArray {
+        let inputSamples: Int = xs.ndim >= 1 ? xs.shape[xs.ndim - 1] : 0
+        let inputChannels: Int = xs.ndim >= 2 ? xs.shape[xs.ndim - 2] : 1
+
+        await emit(.codecEncodeStart(codec: "mimi", inputSamples: inputSamples))
+
+        let start = Date()
+        // See `encode(_:) async` for why we bind to a sync function type.
+        let syncEncodeStep: (MLXArray) -> MLXArray = self.encodeStep
+        let result = syncEncodeStep(xs)
+        let elapsed = Date().timeIntervalSince(start)
+
+        let inputBytes = inputSamples * inputChannels * 4 // Float32
+        let outputElements = result.shape.reduce(1, *)
+        let outputBytes = outputElements * 4 // Int32 indices
+
+        if inputBytes > 0 && outputBytes > 0 {
+            let compressionRatio = Double(inputBytes) / Double(outputBytes)
+            await emit(.codecEncodeComplete(
+                codec: "mimi",
+                durationSeconds: elapsed,
+                compressionRatio: compressionRatio
+            ))
+        } else {
+            await emit(.codecError(
+                codec: "mimi",
+                operation: "encodeStep",
+                error: "compressionRatio unavailable: inputBytes=\(inputBytes) outputBytes=\(outputBytes)"
+            ))
+        }
+
+        return result
+    }
+
+    /// Per-frame streaming decode step (synchronous). Called by ``MimiStreamingDecoder``.
+    ///
+    /// **Not instrumented at the per-step level** — telemetry is emitted by
+    /// ``MimiStreamingDecoder/decodeFrames(_:)`` once per batch of frames
+    /// (start before the loop, complete after). This prevents per-frame
+    /// emission inside hot decode loops.
     public func decodeStep(_ codes: MLXArray) -> MLXArray {
         var z = quantizer.decode(codes)
         z = upsample.step(z)
@@ -236,8 +437,46 @@ public final class Mimi: Module {
 
 // MARK: - Streaming
 
+/// Streaming decoder for Mimi that processes one batch of frames at a time.
+///
+/// ## Telemetry
+///
+/// Attach a reporter via ``setTelemetry(_:)`` to receive
+/// ``MLXAudioTelemetryEvent/codecDecodeStart(codec:codedFrames:)`` /
+/// ``MLXAudioTelemetryEvent/codecDecodeComplete(codec:durationSeconds:outputSamples:)``
+/// once per ``decodeFrames(_:)`` call (never inside the per-frame loop).
+///
+/// Marvis calls ``decodeFrames(_:)`` from `generateResultChunk`. This
+/// is the correct boundary — one start+complete pair per streaming
+/// result chunk, not per individual frame.
 public final class MimiStreamingDecoder {
     private let mimi: Mimi
+
+    // MARK: - Telemetry
+
+    /// Optional vendor-neutral telemetry reporter. `nil` by default — zero
+    /// overhead when no reporter is attached.
+    private var telemetry: (any MLXAudioTelemetryReporter)?
+
+    /// Attach or detach a telemetry reporter.
+    ///
+    /// Set to `nil` (the default) to disable telemetry entirely. Setting a
+    /// reporter enables ``MLXAudioTelemetryEvent`` emission at every public
+    /// decode boundary.
+    public func setTelemetry(_ reporter: (any MLXAudioTelemetryReporter)?) {
+        self.telemetry = reporter
+    }
+
+    /// Canonical per-instance emit helper (copied verbatim from
+    /// `MLXAudioTelemetryReporter.swift` doc comment).
+    ///
+    /// The `@autoclosure` is load-bearing: when `telemetry` is `nil` the
+    /// closure is never evaluated, so payload-construction work (shape
+    /// reads, multiplications) is completely elided.
+    private func emit(_ event: @autoclosure () -> MLXAudioTelemetryEvent) async {
+        guard let telemetry else { return }
+        await telemetry.capture(event())
+    }
 
     public init(_ mimi: Mimi) {
         self.mimi = mimi
@@ -250,6 +489,16 @@ public final class MimiStreamingDecoder {
         for c in mimi.decoderCache { c.trim(c.offset) }
     }
 
+    /// Decode a batch of token frames into audio samples (synchronous overload).
+    ///
+    /// This overload is retained for backward compatibility with existing
+    /// synchronous callers (e.g. Marvis's `generateResultChunk`). No
+    /// public-surface telemetry is emitted from this path — use the
+    /// `async` overload if you need telemetry.
+    ///
+    /// Telemetry emission is deferred to the caller level — emit
+    /// ``codecDecodeStart`` / ``codecDecodeComplete`` via the async overload
+    /// when the call site supports it.
     public func decodeFrames(_ tokens: MLXArray) -> MLXArray {
         let tok = (tokens.ndim == 2) ? tokens.expandedDimensions(axes: [0]) : tokens // ensure [B,C,T]
         let T = tok.shape[2]
@@ -268,6 +517,44 @@ public final class MimiStreamingDecoder {
             #endif
         }
         return concatenated(pcs, axis: 2) // [B, 1, samples]
+    }
+
+    /// Decode a batch of token frames into audio samples with telemetry emission.
+    ///
+    /// Emits ``MLXAudioTelemetryEvent/codecDecodeStart(codec:codedFrames:)``
+    /// **once** before the frame loop, then
+    /// ``MLXAudioTelemetryEvent/codecDecodeComplete(codec:durationSeconds:outputSamples:)``
+    /// **once** after the loop completes.
+    ///
+    /// No events are emitted inside the per-frame decode loop — only boundary
+    /// events are produced.
+    ///
+    /// `codedFrames` is `tokens.shape[2]` (the T dimension of `[B, C, T]`).
+    /// `outputSamples` is the last dimension of the decoded `[B, 1, S]` result.
+    public func decodeFrames(_ tokens: MLXArray) async -> MLXArray {
+        let tok = (tokens.ndim == 2) ? tokens.expandedDimensions(axes: [0]) : tokens // ensure [B,C,T]
+        let codedFrames: Int = tok.ndim >= 3 ? tok.shape[2] : (tok.ndim >= 1 ? tok.shape[tok.ndim - 1] : 0)
+
+        // Emit start ONCE before the frame loop — never inside it.
+        await emit(.codecDecodeStart(codec: "mimi", codedFrames: codedFrames))
+
+        let start = Date()
+        // See `Mimi.encode(_:) async` for why we bind to a sync function type.
+        let syncDecodeFrames: (MLXArray) -> MLXArray = self.decodeFrames
+        let result = syncDecodeFrames(tokens)
+        let elapsed = Date().timeIntervalSince(start)
+
+        // outputSamples: last dimension of [B, 1, S].
+        let outputSamples: Int = result.ndim >= 1 ? result.shape[result.ndim - 1] : 0
+
+        // Emit complete ONCE after the frame loop — never inside it.
+        await emit(.codecDecodeComplete(
+            codec: "mimi",
+            durationSeconds: elapsed,
+            outputSamples: outputSamples
+        ))
+
+        return result
     }
 }
 

@@ -28,6 +28,32 @@ public final class PocketTTSModel: Module, SpeechGenerationModel, @unchecked Sen
 
     public var sampleRate: Int { config.mimi.sampleRate }
 
+    // MARK: - Telemetry (OPERATION SILENT STETHOSCOPE — Sortie 10)
+
+    /// Attached telemetry reporter. `nil` by default — zero runtime cost
+    /// when no reporter is set (invariant 3 from REQUIREMENTS §6).
+    private var telemetry: (any MLXAudioTelemetryReporter)? = nil
+
+    /// Attach or detach a telemetry reporter.
+    ///
+    /// Call before the first `generate*` invocation. Passing `nil`
+    /// detaches the reporter and restores the zero-cost default.
+    ///
+    /// - Parameter reporter: Reporter to attach, or `nil` to detach.
+    public func setTelemetry(_ reporter: (any MLXAudioTelemetryReporter)?) {
+        self.telemetry = reporter
+    }
+
+    /// Canonical per-instance emit helper (copied verbatim from
+    /// `MLXAudioTelemetryReporter.swift` doc comment).
+    ///
+    /// The `@autoclosure` ensures payload construction (string formatting,
+    /// arithmetic) is elided entirely when `telemetry` is `nil`.
+    private func emit(_ event: @autoclosure () -> MLXAudioTelemetryEvent) async {
+        guard let telemetry else { return }
+        await telemetry.capture(event())
+    }
+
     private init(config: PocketTTSModelConfig, modelFolder: URL, flowLM: FlowLMModel, mimi: MimiAdapter) {
         self.config = config
         self.modelFolder = modelFolder
@@ -304,27 +330,61 @@ public final class PocketTTSModel: Module, SpeechGenerationModel, @unchecked Sen
         instruct: String?,
         generationParameters: GenerateParameters
     ) async throws -> MLXArray {
+        let modelName = "PocketTTS"
+        await emit(.ttsGenerationStart(model: modelName, textLength: text.count, voiceType: voice))
+
         // S11: PocketTTS.generate interval (Level 2 = .operations).
         #if MLXAUDIO_TELEMETRY_FULL
         if Telemetry.level >= .operations {
-            return try await Telemetry.emitIntervalAsync(
-                name: "PocketTTS.generate",
-                family: .pocketTTS,
-                message: text.prefix(64).description
-            ) {
-                try await self._generateImpl(
-                    text: text, voice: voice, refAudio: refAudio, refText: refText,
-                    language: language, instruct: instruct,
-                    generationParameters: generationParameters
-                )
+            do {
+                let audio = try await Telemetry.emitIntervalAsync(
+                    name: "PocketTTS.generate",
+                    family: .pocketTTS,
+                    message: text.prefix(64).description
+                ) {
+                    try await self._generateImpl(
+                        text: text, voice: voice, refAudio: refAudio, refText: refText,
+                        language: language, instruct: instruct,
+                        generationParameters: generationParameters
+                    )
+                }
+                await emit(.ttsGenerationComplete(
+                    model: modelName,
+                    durationSeconds: Double(audio.shape.last ?? 0) / Double(sampleRate),
+                    audioSamples: audio.shape.last ?? 0,
+                    sampleRate: sampleRate
+                ))
+                return audio
+            } catch {
+                await emit(.ttsGenerationError(model: modelName, phase: "generate", error: error.localizedDescription))
+                throw error
             }
         }
         #endif
-        return try await _generateImpl(
-            text: text, voice: voice, refAudio: refAudio, refText: refText,
-            language: language, instruct: instruct,
-            generationParameters: generationParameters
-        )
+        do {
+            let audio = try await _generateImpl(
+                text: text, voice: voice, refAudio: refAudio, refText: refText,
+                language: language, instruct: instruct,
+                generationParameters: generationParameters
+            )
+            // PocketTTS uses flow-matching (no discrete-token streaming).
+            // There is no natural per-step progress signal from the ODE solver loop —
+            // each step produces a raw continuous latent, not a discrete frame count.
+            // `ttsGenerationProgress` is therefore omitted entirely: emitting it at
+            // an artificial fraction (e.g. 0.5 halfway through maxGenLen) would be
+            // misleading because the loop terminates early on EOS detection, so
+            // step-count is not a reliable proxy for audio fraction-complete.
+            await emit(.ttsGenerationComplete(
+                model: modelName,
+                durationSeconds: Double(audio.shape.last ?? 0) / Double(sampleRate),
+                audioSamples: audio.shape.last ?? 0,
+                sampleRate: sampleRate
+            ))
+            return audio
+        } catch {
+            await emit(.ttsGenerationError(model: modelName, phase: "generate", error: error.localizedDescription))
+            throw error
+        }
     }
 
     private func _generateImpl(
@@ -370,6 +430,11 @@ public final class PocketTTSModel: Module, SpeechGenerationModel, @unchecked Sen
     ) -> AsyncThrowingStream<AudioGeneration, Error> {
         let (stream, continuation) = AsyncThrowingStream<AudioGeneration, Error>.makeStream()
 
+        // PocketTTS uses flow-matching (no discrete-token streaming). The inner ODE
+        // solver loop does not expose a per-step completion signal, so
+        // `ttsGenerationProgress` is omitted entirely. Telemetry is delegated to
+        // `generate(_:)` which emits `ttsGenerationStart`, `ttsGenerationComplete`,
+        // and `ttsGenerationError` around the full generation call.
         Task { @Sendable [weak self] in
             guard let self else { return }
             do {

@@ -691,6 +691,31 @@ public class Qwen3ASRModel: Module {
     /// Sample rate expected by the model (16kHz).
     public let sampleRate: Int = 16000
 
+    // MARK: - Vendor-neutral telemetry (Sortie 12 — OPERATION SILENT STETHOSCOPE)
+
+    /// Optional telemetry reporter. Defaults to `nil` — zero runtime cost
+    /// when no host has attached a reporter. Set via ``setTelemetry(_:)``.
+    private var telemetry: (any MLXAudioTelemetryReporter)?
+
+    /// Attach (or detach) a telemetry reporter.
+    ///
+    /// Call after construction; does not affect the model's weights or
+    /// inference behaviour. Passing `nil` silences all emission (default).
+    public func setTelemetry(_ reporter: (any MLXAudioTelemetryReporter)?) {
+        telemetry = reporter
+    }
+
+    /// Canonical per-instance emit helper (copied verbatim per Resolved
+    /// Design Decisions in EXECUTION_PLAN.md).
+    ///
+    /// The `@autoclosure` is load-bearing: payload construction (e.g.
+    /// `String(describing:)` formatting, array-count reads) is deferred
+    /// and skipped entirely when `telemetry` is `nil`.
+    private func emit(_ event: @autoclosure () -> MLXAudioTelemetryEvent) async {
+        guard let telemetry else { return }
+        await telemetry.capture(event())
+    }
+
     public init(_ config: Qwen3ASRConfig) {
         self.config = config
 
@@ -1134,10 +1159,27 @@ public class Qwen3ASRModel: Module {
         minChunkDuration: Float = 1.0,
         maxBatchSize: Int = Qwen3ASRModel.defaultMaxBatchSize
     ) -> STTOutput {
+        // Emit sttTranscriptionStart — fire-and-forget because generate() is synchronous.
+        // Capture the Sendable reporter (not self) so the detached Task never
+        // touches the non-Sendable model.
+        let audioSampleCount = audio.size
+        let capturedSampleRate = sampleRate
+        if let reporter = telemetry {
+            Task {
+                await reporter.capture(.sttTranscriptionStart(
+                    model: "qwen3-asr",
+                    audioSamples: audioSampleCount,
+                    sampleRate: capturedSampleRate
+                ))
+            }
+        }
+
+        let startTime = Date()
+
         // S11: Qwen3ASR.generate interval (Level 2 = .operations).
         #if MLXAUDIO_TELEMETRY_FULL
         if Telemetry.level >= .operations {
-            return Telemetry.emitInterval(
+            let result = Telemetry.emitInterval(
                 name: "Qwen3ASR.generate",
                 family: .qwen3ASR,
                 message: language
@@ -1148,13 +1190,40 @@ public class Qwen3ASRModel: Module {
                     minChunkDuration: minChunkDuration, maxBatchSize: maxBatchSize
                 )
             }
+            let elapsed = Date().timeIntervalSince(startTime)
+            let textLen = result.text.count
+            if let reporter = telemetry {
+                Task {
+                    await reporter.capture(.sttTranscriptionComplete(
+                        model: "qwen3-asr",
+                        durationSeconds: elapsed,
+                        textLength: textLen
+                    ))
+                }
+            }
+            return result
         }
         #endif
-        return _generateImpl(
+
+        let result = _generateImpl(
             audio: audio, maxTokens: maxTokens, temperature: temperature,
             language: language, chunkDuration: chunkDuration,
             minChunkDuration: minChunkDuration, maxBatchSize: maxBatchSize
         )
+
+        let elapsed = Date().timeIntervalSince(startTime)
+        let textLen = result.text.count
+        if let reporter = telemetry {
+            Task {
+                await reporter.capture(.sttTranscriptionComplete(
+                    model: "qwen3-asr",
+                    durationSeconds: elapsed,
+                    textLength: textLen
+                ))
+            }
+        }
+
+        return result
     }
 
     private func _generateImpl(
@@ -1287,11 +1356,40 @@ public class Qwen3ASRModel: Module {
         minChunkDuration: Float = 1.0,
         maxBatchSize: Int = Qwen3ASRModel.defaultMaxBatchSize
     ) -> AsyncThrowingStream<STTGeneration, Error> {
-        AsyncThrowingStream { continuation in
+        // Capture audio metadata before entering the stream closure so
+        // the telemetry payload is available without referencing `audio`
+        // from the captured context after the call returns.
+        let audioSampleCount = audio.size
+        let streamStartTime = Date()
+
+        // Emit sttTranscriptionStart — fire-and-forget from synchronous context.
+        let capturedSampleRate = sampleRate
+        if let reporter = telemetry {
+            Task {
+                await reporter.capture(.sttTranscriptionStart(
+                    model: "qwen3-asr",
+                    audioSamples: audioSampleCount,
+                    sampleRate: capturedSampleRate
+                ))
+            }
+        }
+
+        // Snapshot the reporter so the stream's detached completion/error
+        // Tasks can capture a Sendable value instead of `self`.
+        let streamReporter = telemetry
+
+        return AsyncThrowingStream { continuation in
+            // Track the current pipeline phase so the catch block can
+            // emit an accurate phase: string. Phases match the actual
+            // code paths in this method (not abstract stage names).
+            var currentPhase = "tokenizer"
+
             do {
                 guard let tokenizer = self.tokenizer else {
                     throw STTError.modelNotInitialized("Tokenizer not loaded")
                 }
+
+                currentPhase = "audio_chunking"
 
                 let startTime = Date()
                 let eosTokenIds = [151645, 151643]
@@ -1361,6 +1459,8 @@ public class Qwen3ASRModel: Module {
                     remainingTokens -= chunkTokens.count
                 }
 
+                currentPhase = "feature_extraction"
+
                 if chunks.count == 1 {
                     // Single chunk: preprocess + encode + stream decode directly
                     let (chunkAudio, _) = chunks[0]
@@ -1371,6 +1471,7 @@ public class Qwen3ASRModel: Module {
                     )
                     eval(audioFeatures)
 
+                    currentPhase = "decode"
                     streamDecodeFromFeatures(
                         audioFeatures: audioFeatures,
                         numAudioTokens: numAudioTokens
@@ -1387,6 +1488,8 @@ public class Qwen3ASRModel: Module {
 
                         // Batch encode all audio chunks in this sub-batch
                         let encodedChunks = self.batchEncodeAudioChunks(audioChunks)
+
+                        currentPhase = "decode"
 
                         // Sequential streaming decode for each chunk
                         for (batchOffset, _) in batchChunks.enumerated() {
@@ -1433,8 +1536,35 @@ public class Qwen3ASRModel: Module {
                     peakMemoryUsage: peakMemory
                 )
                 continuation.yield(.result(output))
+
+                // Emit sttTranscriptionComplete — fire-and-forget.
+                let elapsed = Date().timeIntervalSince(streamStartTime)
+                let textLen = text.count
+                if let reporter = streamReporter {
+                    Task {
+                        await reporter.capture(.sttTranscriptionComplete(
+                            model: "qwen3-asr",
+                            durationSeconds: elapsed,
+                            textLength: textLen
+                        ))
+                    }
+                }
+
                 continuation.finish()
             } catch {
+                // Emit sttTranscriptionError with the phase where the error
+                // was thrown. The error is re-thrown to the stream consumer.
+                let errorString = String(describing: error)
+                let phase = currentPhase
+                if let reporter = streamReporter {
+                    Task {
+                        await reporter.capture(.sttTranscriptionError(
+                            model: "qwen3-asr",
+                            phase: phase,
+                            error: errorString
+                        ))
+                    }
+                }
                 continuation.finish(throwing: error)
             }
         }

@@ -46,30 +46,83 @@ public class AudioUtils {
 /// truncates to 1024-frame boundaries for non-aligned file lengths (Sortie 14
 /// finding, originally mis-attributed to saveAudioArray); the hand-rolled WAV
 /// path avoids that. Non-WAV containers fall back to AVAudioFile.
-public func loadAudioArray(from url: URL) throws -> (Int, MLXArray) {
-    if let wav = try readWavFile(at: url) {
-        return wav
+///
+/// - Parameters:
+///   - url: The file URL to load audio from.
+///   - telemetry: Optional telemetry reporter. When `nil` (the default), no
+///     events are emitted and no payload primitives are computed — zero overhead.
+///     When non-nil, emits `audioLoadStart`, `audioLoadComplete`, and
+///     `audioIOError` (on failure).
+///
+/// Existing call sites that omit `telemetry:` compile unchanged because the
+/// parameter is defaulted to `nil`.
+public func loadAudioArray(
+    from url: URL,
+    telemetry: (any MLXAudioTelemetryReporter)? = nil
+) throws -> (Int, MLXArray) {
+    // Compute file size only when a reporter is attached (invariant 3: zero overhead).
+    if let telemetry {
+        let fileSizeMB: Double
+        if let attrs = try? FileManager.default.attributesOfItem(atPath: url.path),
+           let fileSize = attrs[.size] as? Int {
+            fileSizeMB = Double(fileSize) / (1024.0 * 1024.0)
+        } else {
+            fileSizeMB = 0
+        }
+        let path = url.path
+        Task { await telemetry.capture(.audioLoadStart(path: path, fileSizeMB: fileSizeMB)) }
     }
 
-    let audioFile = try AVAudioFile(forReading: url)
-    let format = audioFile.processingFormat
-    let frameCount = AVAudioFrameCount(audioFile.length)
+    do {
+        let result: (Int, MLXArray)
+        if let wav = try readWavFile(at: url) {
+            result = wav
+        } else {
+            let audioFile = try AVAudioFile(forReading: url)
+            let format = audioFile.processingFormat
+            let frameCount = AVAudioFrameCount(audioFile.length)
 
-    guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameCount) else {
-        throw NSError(domain: "TestHelpers", code: 1, userInfo: [NSLocalizedDescriptionKey: "Failed to create audio buffer"])
+            guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameCount) else {
+                throw NSError(domain: "TestHelpers", code: 1, userInfo: [NSLocalizedDescriptionKey: "Failed to create audio buffer"])
+            }
+
+            try audioFile.read(into: buffer)
+
+            guard let floatChannelData = buffer.floatChannelData else {
+                throw NSError(domain: "TestHelpers", code: 2, userInfo: [NSLocalizedDescriptionKey: "Failed to get float channel data"])
+            }
+
+            let sampleRate = Int(format.sampleRate)
+            let samples = Array(UnsafeBufferPointer(start: floatChannelData[0], count: Int(buffer.frameLength)))
+            let audioData = MLXArray(samples)
+            result = (sampleRate, audioData)
+        }
+
+        if let telemetry {
+            let (sampleRate, audioData) = result
+            let samples = audioData.shape[0]
+            let durationSeconds = samples > 0 && sampleRate > 0
+                ? Double(samples) / Double(sampleRate) : 0.0
+            let path = url.path
+            Task {
+                await telemetry.capture(.audioLoadComplete(
+                    path: path,
+                    samples: samples,
+                    sampleRate: sampleRate,
+                    durationSeconds: durationSeconds
+                ))
+            }
+        }
+
+        return result
+    } catch {
+        if let telemetry {
+            let path = url.path
+            let errorString = String(describing: error)
+            Task { await telemetry.capture(.audioIOError(path: path, operation: "load", error: errorString)) }
+        }
+        throw error
     }
-
-    try audioFile.read(into: buffer)
-
-    guard let floatChannelData = buffer.floatChannelData else {
-        throw NSError(domain: "TestHelpers", code: 2, userInfo: [NSLocalizedDescriptionKey: "Failed to get float channel data"])
-    }
-
-    let sampleRate = Int(format.sampleRate)
-    let samples = Array(UnsafeBufferPointer(start: floatChannelData[0], count: Int(buffer.frameLength)))
-    let audioData = MLXArray(samples)
-
-    return (sampleRate, audioData)
 }
 
 /// Hand-rolled RIFF/WAVE reader. Returns nil if the file isn't a WAV (caller
@@ -187,26 +240,76 @@ private extension Data {
 }
 
 /// Save audio data to a WAV file.
-func saveAudioArray(_ audio: MLXArray, sampleRate: Double, to url: URL) throws {
+///
+/// - Parameters:
+///   - audio: The MLXArray of float32 audio samples to write.
+///   - sampleRate: The sample rate in Hz.
+///   - url: The destination file URL.
+///   - telemetry: Optional telemetry reporter. When `nil` (the default), no
+///     events are emitted and no payload primitives are computed — zero overhead.
+///     When non-nil, emits `audioSaveStart`, `audioSaveComplete`, and
+///     `audioIOError` (on failure).
+///
+/// Existing call sites that omit `telemetry:` compile unchanged because the
+/// parameter is defaulted to `nil`.
+func saveAudioArray(
+    _ audio: MLXArray,
+    sampleRate: Double,
+    to url: URL,
+    telemetry: (any MLXAudioTelemetryReporter)? = nil
+) throws {
     let samples = audio.asArray(Float.self)
 
-    let format = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: 1)!
-    let audioFile = try AVAudioFile(forWriting: url, settings: format.settings)
-
-    let frameCount = AVAudioFrameCount(samples.count)
-    guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameCount) else {
-        throw NSError(domain: "TestHelpers", code: 3, userInfo: [NSLocalizedDescriptionKey: "Failed to create audio buffer"])
-    }
-
-    buffer.frameLength = frameCount
-
-    if let channelData = buffer.floatChannelData {
-        for i in 0..<samples.count {
-            channelData[0][i] = samples[i]
+    if let telemetry {
+        let path = url.path
+        let sampleRateInt = Int(sampleRate)
+        Task {
+            await telemetry.capture(.audioSaveStart(
+                path: path,
+                samples: samples.count,
+                sampleRate: sampleRateInt
+            ))
         }
     }
 
-    try audioFile.write(from: buffer)
+    do {
+        let format = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: 1)!
+        let audioFile = try AVAudioFile(forWriting: url, settings: format.settings)
+
+        let frameCount = AVAudioFrameCount(samples.count)
+        guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameCount) else {
+            throw NSError(domain: "TestHelpers", code: 3, userInfo: [NSLocalizedDescriptionKey: "Failed to create audio buffer"])
+        }
+
+        buffer.frameLength = frameCount
+
+        if let channelData = buffer.floatChannelData {
+            for i in 0..<samples.count {
+                channelData[0][i] = samples[i]
+            }
+        }
+
+        try audioFile.write(from: buffer)
+
+        if let telemetry {
+            let path = url.path
+            let fileSizeMB: Double
+            if let attrs = try? FileManager.default.attributesOfItem(atPath: url.path),
+               let fileSize = attrs[.size] as? Int {
+                fileSizeMB = Double(fileSize) / (1024.0 * 1024.0)
+            } else {
+                fileSizeMB = 0
+            }
+            Task { await telemetry.capture(.audioSaveComplete(path: path, fileSizeMB: fileSizeMB)) }
+        }
+    } catch {
+        if let telemetry {
+            let path = url.path
+            let errorString = String(describing: error)
+            Task { await telemetry.capture(.audioIOError(path: path, operation: "save", error: errorString)) }
+        }
+        throw error
+    }
 }
 
 /// A streaming WAV writer that allows writing audio chunks incrementally to a file.
