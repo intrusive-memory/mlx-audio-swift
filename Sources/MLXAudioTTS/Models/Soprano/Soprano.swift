@@ -199,6 +199,32 @@ public class SopranoModel: Module, KVCacheDimensionProvider, SpeechGenerationMod
         return configuration.hiddenLayers
     }
 
+    // MARK: - Telemetry (OPERATION SILENT STETHOSCOPE — Sortie 8)
+
+    /// Attached telemetry reporter. `nil` by default — zero runtime cost
+    /// when no reporter is set (invariant 3 from REQUIREMENTS §6).
+    private var telemetry: (any MLXAudioTelemetryReporter)? = nil
+
+    /// Attach or detach a telemetry reporter.
+    ///
+    /// Call before the first `generate*` invocation. Passing `nil`
+    /// detaches the reporter and restores the zero-cost default.
+    ///
+    /// - Parameter reporter: Reporter to attach, or `nil` to detach.
+    public func setTelemetry(_ reporter: (any MLXAudioTelemetryReporter)?) {
+        self.telemetry = reporter
+    }
+
+    /// Canonical per-instance emit helper (copied verbatim from
+    /// `MLXAudioTelemetryReporter.swift` doc comment).
+    ///
+    /// The `@autoclosure` ensures payload construction (string formatting,
+    /// arithmetic) is elided entirely when `telemetry` is `nil`.
+    private func emit(_ event: @autoclosure () -> MLXAudioTelemetryEvent) async {
+        guard let telemetry else { return }
+        await telemetry.capture(event())
+    }
+
     public init(_ config: SopranoConfiguration) {
         self.configuration = config
         self.vocabularySize = config.vocabularySize
@@ -579,6 +605,13 @@ public class SopranoModel: Module, KVCacheDimensionProvider, SpeechGenerationMod
     ///   - voice: Voice name (unused in base Soprano)
     ///   - parameters: Generation parameters
     /// - Returns: Generated audio as MLXArray
+    ///
+    /// Telemetry: emits `ttsGenerationStart`, `ttsGenerationComplete`, and
+    /// `ttsGenerationError` at this boundary. `ttsGenerationProgress` is
+    /// omitted because this non-streaming path materialises all audio in
+    /// one blocking call; there are no natural mid-generation checkpoints
+    /// to report without emitting inside the per-token decode loop (which
+    /// is prohibited by REQUIREMENTS §7 anti-pattern rules).
     public func generate(
         text: String,
         voice: String? = nil,
@@ -591,6 +624,10 @@ public class SopranoModel: Module, KVCacheDimensionProvider, SpeechGenerationMod
             repetitionContextSize: 30
         )
     ) async throws -> MLXArray {
+        let modelName = "SopranoTTS"
+        await emit(.ttsGenerationStart(model: modelName, textLength: text.count, voiceType: voice))
+        let generateStart = Date()
+        do {
         guard self.tokenizer != nil else {
             throw SopranoError.modelNotInitialized("Tokenizer not loaded")
         }
@@ -687,7 +724,23 @@ public class SopranoModel: Module, KVCacheDimensionProvider, SpeechGenerationMod
             throw SopranoError.generationFailed("No audio generated")
         }
 
+        let durationSeconds = Date().timeIntervalSince(generateStart)
+        let audioSamples = finalAudio.dim(0)
+        await emit(.ttsGenerationComplete(
+            model: modelName,
+            durationSeconds: durationSeconds,
+            audioSamples: audioSamples,
+            sampleRate: sampleRate
+        ))
         return finalAudio
+        } catch {
+            await emit(.ttsGenerationError(
+                model: modelName,
+                phase: "generate",
+                error: String(describing: error)
+            ))
+            throw error
+        }
     }
 
     /// Generate audio with streaming events.
@@ -705,26 +758,29 @@ public class SopranoModel: Module, KVCacheDimensionProvider, SpeechGenerationMod
         let (stream, continuation) = AsyncThrowingStream<SopranoGeneration, Error>.makeStream()
         Task { @Sendable [weak self, continuation] in
             guard let self else { return }
-            
+            let modelName = "SopranoTTS"
+            let generateStart = Date()
+            await self.emit(.ttsGenerationStart(model: modelName, textLength: text.count, voiceType: voice))
+
             do {
                 guard self.tokenizer != nil else {
                     throw SopranoError.modelNotInitialized("Tokenizer not loaded")
                 }
-                
+
                 let prompt = text.replacingOccurrences(of: "\\n", with: "\n")
                     .replacingOccurrences(of: "\\t", with: "\t")
-                
+
                 let startTime = Date()
                 let sentenceData = self.preprocessText([prompt])
-                
+
                 var audioParts: [MLXArray] = []
                 var totalTokens = 0
                 let maxTokens = parameters.maxTokens ?? 512
-                
+
                 for (promptText, _, _) in sentenceData {
                     let inputIds = self.tokenize(promptText)
                     var allHiddenStates: [MLXArray] = []
-                    
+
                     for await (token, hiddenState) in self.streamGenerate(
                         inputIds: inputIds,
                         maxTokens: maxTokens,
@@ -734,33 +790,46 @@ public class SopranoModel: Module, KVCacheDimensionProvider, SpeechGenerationMod
                         repetitionContextSize: parameters.repetitionContextSize
                     ) {
                         allHiddenStates.append(hiddenState)
-                        
+
                         if let tokenVal = token {
                             continuation.yield(.token(tokenVal))
                         }
                     }
-                    
+
                     let tokenCount = allHiddenStates.count
                     totalTokens += tokenCount
-                    
+
                     // Stack hidden states
                     let hiddenStates = MLX.concatenated(allHiddenStates, axis: 1)
-                    
+
                     // Decode to audio
                     var audio = self.decoder(hiddenStates)
-                    
+
                     let tokenSize = self.configuration.tokenSize
                     let audioLength = tokenCount * tokenSize - tokenSize
-                    
+
                     if audioLength > 0 {
                         audio = audio[0, (-audioLength)...]
                     } else {
                         audio = audio[0]
                     }
-                    
+
                     audioParts.append(audio)
                 }
-                
+
+                // Emit ttsGenerationProgress at a single fraction-complete checkpoint
+                // AFTER all per-sentence generate loops have completed. This is the ONLY
+                // location where progress fires — outside every for/while loop body
+                // (REQUIREMENTS §7 anti-pattern compliance). Soprano's streamGenerate
+                // exposes no natural mid-generation fraction signal, so we emit once at
+                // completion (fractionComplete = 1.0) with the accumulated sample estimate.
+                let estimatedSamples = totalTokens * (parameters.maxTokens ?? 512)
+                await self.emit(.ttsGenerationProgress(
+                    model: modelName,
+                    fractionComplete: 1.0,
+                    generatedSamples: estimatedSamples
+                ))
+
                 // Concatenate audio
                 let finalAudio: MLXArray
                 if audioParts.count > 1 {
@@ -768,9 +837,9 @@ public class SopranoModel: Module, KVCacheDimensionProvider, SpeechGenerationMod
                 } else {
                     finalAudio = audioParts[0]
                 }
-                
+
                 let elapsed = Date().timeIntervalSince(startTime)
-                
+
                 // Yield info
                 let info = SopranoGenerationInfo(
                     promptTokenCount: 0,
@@ -781,12 +850,26 @@ public class SopranoModel: Module, KVCacheDimensionProvider, SpeechGenerationMod
                     peakMemoryUsage: Double(Memory.peakMemory) / 1e9
                 )
                 continuation.yield(.info(info))
-                
+
                 // Yield audio
                 continuation.yield(.audio(finalAudio))
-                
+
+                let durationSeconds = Date().timeIntervalSince(generateStart)
+                let audioSamples = finalAudio.dim(0)
+                await self.emit(.ttsGenerationComplete(
+                    model: modelName,
+                    durationSeconds: durationSeconds,
+                    audioSamples: audioSamples,
+                    sampleRate: self.sampleRate
+                ))
+
                 continuation.finish()
             } catch {
+                await self.emit(.ttsGenerationError(
+                    model: modelName,
+                    phase: "generateStream",
+                    error: String(describing: error)
+                ))
                 continuation.finish(throwing: error)
             }
         }

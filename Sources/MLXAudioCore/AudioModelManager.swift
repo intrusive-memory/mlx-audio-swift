@@ -13,6 +13,7 @@
 //
 
 import Foundation
+import Metal
 import SwiftAcervo
 
 // MARK: - Supported Audio Models
@@ -648,6 +649,53 @@ private let _registerAudioComponents: Void = {
 /// 2. P2 models 🚧 IN PROGRESS: Registered but still use HF fallback
 /// 3. P2 models FUTURE: Remove HF fallback, require Acervo registration
 
+// MARK: - Telemetry storage (Sortie 2 — OPERATION SILENT STETHOSCOPE)
+
+/// File-private actor that holds the optional public-telemetry reporter
+/// for the `AudioModelManager` namespace.
+///
+/// `AudioModelManager` is a `public enum` with only `static` members, so
+/// the canonical per-instance `private var telemetry: ...?` storage from
+/// `MLXAudioTelemetryReporter.swift`'s doc comment cannot live on `self`.
+/// We instead hold the reporter inside a single file-private actor and
+/// expose the canonical `setTelemetry(_:)` / `emit(_:)` shape through
+/// `static` wrappers on `AudioModelManager`.
+///
+/// The `@autoclosure` deferral semantics of the canonical helper are
+/// preserved: payload-construction (e.g. `MTLDevice.currentAllocatedSize`
+/// sampling, error-string formatting) only runs after we have read a
+/// non-`nil` reporter out of the actor. With no reporter attached the
+/// `event()` autoclosure is never invoked, satisfying invariant 6 of
+/// REQUIREMENTS-telemetry.md §6.
+private actor _AudioModelManagerTelemetryStorage {
+  static let shared = _AudioModelManagerTelemetryStorage()
+
+  private var telemetry: (any MLXAudioTelemetryReporter)?
+
+  private init() {
+    self.telemetry = nil
+  }
+
+  func set(_ reporter: (any MLXAudioTelemetryReporter)?) {
+    self.telemetry = reporter
+  }
+
+  func current() -> (any MLXAudioTelemetryReporter)? {
+    telemetry
+  }
+}
+
+// MARK: - Metal sampler (Sortie 5 — OPERATION SILENT STETHOSCOPE)
+//
+// Process-wide `MetalMemorySampler` instance. The sampler is a Swift
+// `actor` so its `lastSampledMB` baseline is safe to share across
+// every load path in this file. We do NOT modify Sortie 2's
+// `setTelemetry` / `emit` / storage — the sampler reads the same
+// reporter that Sortie 2's storage actor already holds, and is invoked
+// alongside (not inside) the existing `modelLoadComplete` emit at the
+// same coarse-grained boundary.
+private let _audioModelManagerMetalSampler = MetalMemorySampler()
+
 // MARK: - AudioModelManager
 
 /// Manager for audio model lifecycle and Acervo component integration.
@@ -666,6 +714,104 @@ private let _registerAudioComponents: Void = {
 /// - Integrity verification via checksums
 /// - Prevents direct file system access for model files
 public enum AudioModelManager {
+  // MARK: - Public Telemetry API (Sortie 2 — OPERATION SILENT STETHOSCOPE)
+
+  /// Attach (or detach) a vendor-neutral telemetry reporter.
+  ///
+  /// Pass `nil` (the default state) to silence the namespace; with no
+  /// reporter attached every emission site short-circuits before any
+  /// payload construction runs (Metal sampling, error-string
+  /// formatting, etc.) — see invariant 3 / 6 of
+  /// `REQUIREMENTS-telemetry.md §6` and the canonical `emit(_:)`
+  /// snippet documented in `MLXAudioTelemetryReporter.swift`.
+  ///
+  /// `AudioModelManager` is a `public enum` with only `static` members,
+  /// so storage lives in a file-private actor
+  /// (`_AudioModelManagerTelemetryStorage`). The setter is `async`
+  /// because it forwards to that actor; that matches the
+  /// `actor`-friendly setter shape recommended by the canonical
+  /// pattern.
+  public static func setTelemetry(_ reporter: (any MLXAudioTelemetryReporter)?) async {
+    await _AudioModelManagerTelemetryStorage.shared.set(reporter)
+  }
+
+  // MARK: - Internal Telemetry Helpers
+
+  /// Canonical per-namespace `emit(_:)` helper for the public telemetry
+  /// surface. Adapted from the 4-line snippet documented in
+  /// `MLXAudioTelemetryReporter.swift` to the static-namespace shape:
+  /// the actor read replaces the per-instance `guard let telemetry`
+  /// check, but the `@autoclosure` deferral semantics are preserved.
+  ///
+  /// The `@autoclosure` is load-bearing — payload construction only
+  /// runs when `reporter` is non-`nil`, so any expensive sampling
+  /// inside the call site (e.g. `sampleMetalAllocatedMB()`,
+  /// `String(describing: error)`) is elided whenever telemetry is
+  /// detached.
+  private static func emit(_ event: @autoclosure () -> MLXAudioTelemetryEvent) async {
+    guard let reporter = await _AudioModelManagerTelemetryStorage.shared.current() else { return }
+    await reporter.capture(event())
+  }
+
+  /// Sample the current Metal device's allocated buffer size in MB.
+  ///
+  /// Defined as a private helper so the body only references
+  /// `MTLDevice` / `currentAllocatedSize` from a single site that is
+  /// itself only ever invoked from inside an `emit(...)` argument
+  /// list. The grep guard (REQUIREMENTS §6 invariant 6) requires every
+  /// Metal sampling site to be reachable only via an `emit(...)` call;
+  /// concentrating the sampling here keeps that surface area small and
+  /// auditable.
+  ///
+  /// Returns `0.0` when no system default Metal device is available
+  /// (e.g. on a hypothetical headless / non-Metal host); the caller is
+  /// responsible for treating this as a best-effort signal, not a
+  /// strict invariant.
+  private static func sampleMetalAllocatedMB() -> Double {
+    guard let device = MTLCreateSystemDefaultDevice() else { return 0.0 }
+    return Double(device.currentAllocatedSize) / (1024.0 * 1024.0)
+  }
+
+  /// Map a `ComponentDescriptor`'s `estimatedSizeBytes` to an MB
+  /// `Double`. `nil` if the descriptor is `nil` (we still emit, but
+  /// with `0.0` so the schema stays primitive — see
+  /// `MLXAudioTelemetryEvent.modelDownloadComplete` /
+  /// `modelLoadComplete`, both of which require `Double`, not
+  /// `Double?`).
+  private static func sizeMB(for descriptor: ComponentDescriptor?) -> Double {
+    guard let descriptor else { return 0.0 }
+    return Double(descriptor.estimatedSizeBytes) / (1024.0 * 1024.0)
+  }
+
+  /// Sortie 5: forward the current Metal allocation reading to the
+  /// shared `MetalMemorySampler`, which decides whether to emit a
+  /// `metalBufferAllocated` / `metalBufferDeallocated` event based on
+  /// the 10 MB delta-threshold (REQUIREMENTS §2.6).
+  ///
+  /// Called alongside (not inside) the existing `modelLoadComplete`
+  /// emit at every load boundary in this file. Sampling is gated on
+  /// the same reporter Sortie 2's storage actor holds — when no
+  /// reporter is attached this helper short-circuits before the
+  /// `MTLDevice.currentAllocatedSize` read, so the silent-default
+  /// invariant (REQUIREMENTS §6 invariant 3) is preserved. This
+  /// mirrors the `@autoclosure` pattern used by `emit(_:)` above —
+  /// the Metal sampling cost is only paid when there is somewhere
+  /// for the resulting event to go.
+  ///
+  /// Sortie 2's audit invariant — "every `MTLDevice` reference lives
+  /// inside an `await emit(...)` body" — is preserved by routing the
+  /// MTLDevice read through `sampleMetalAllocatedMB()`, the same
+  /// helper Sortie 2 already concentrates the device read into; and
+  /// by gating its invocation on a non-`nil` reporter immediately
+  /// before the call, just as the canonical `emit(_:)` does.
+  private static func sampleMetalForLoadBoundary() async {
+    guard let reporter = await _AudioModelManagerTelemetryStorage.shared.current() else { return }
+    await _audioModelManagerMetalSampler.sample(
+      currentMB: sampleMetalAllocatedMB(),
+      reporter: reporter
+    )
+  }
+
   /// Trigger lazy registration of all P1 and P2 audio components.
   ///
   /// This is called automatically on first use, but can be invoked
@@ -699,39 +845,72 @@ public enum AudioModelManager {
     // Trigger registration if not already done
     ensureComponentsRegistered()
 
-    // S10 Sortie 10: ModelResolver.resolve interval (Level 2 = .operations).
-    // Two-layer gate: `#if MLXAUDIO_TELEMETRY_FULL` strips at lower compile
-    // ceilings, `if Telemetry.level >= .operations` strips when an env-var
-    // floor keeps us at .lifecycle. The wrapped Acervo.ensureComponentReady
-    // call is also wrapped below as the per-component "Acervo.download"
-    // interval; both intervals share the modelResolver subsystem so
-    // Instruments groups them under one lane.
-    #if MLXAUDIO_TELEMETRY_FULL
-    if Telemetry.level >= .operations {
-      try await Telemetry.emitIntervalAsync(
-        name: "ModelResolver.resolve",
-        family: .modelResolver,
-        message: modelRepo.rawValue
-      ) {
-        try await Telemetry.emitIntervalAsync(
-          name: "Acervo.download",
-          family: .modelResolver,
-          message: modelRepo.componentId
-        ) {
-          try await Acervo.ensureComponentReady(
-            modelRepo.componentId,
-            progress: progress
-          )
-        }
-      }
-      return
+    // Public telemetry (Sortie 2): emit a download lifecycle pair
+    // around the Acervo readiness call. `cacheHit` is best-effort —
+    // we sample `Acervo.isComponentReady` *before* the call so a
+    // pre-existing local cache hits as `true` and a fresh download
+    // hits as `false`. We also detect cacheHit by whether
+    // `ensureComponentReady` had any work to do (proxy: was it ready
+    // before the call?). The reporter pays nothing when no telemetry
+    // is attached because the canonical `emit(_:)` helper short-
+    // circuits before any payload work runs.
+    let descriptor = Acervo.component(modelRepo.componentId)
+    let estimatedSizeMB: Double? = descriptor.map {
+      Double($0.estimatedSizeBytes) / (1024.0 * 1024.0)
     }
-    #endif
+    let wasReadyBefore = Acervo.isComponentReady(modelRepo.componentId)
+    await emit(.modelDownloadStart(repo: modelRepo.rawValue, sizeMB: estimatedSizeMB))
 
-    // Use Acervo to ensure component is downloaded and ready
-    try await Acervo.ensureComponentReady(
-      modelRepo.componentId,
-      progress: progress
+    do {
+      // S10 Sortie 10: ModelResolver.resolve interval (Level 2 = .operations).
+      // Two-layer gate: `#if MLXAUDIO_TELEMETRY_FULL` strips at lower compile
+      // ceilings, `if Telemetry.level >= .operations` strips when an env-var
+      // floor keeps us at .lifecycle. The wrapped Acervo.ensureComponentReady
+      // call is also wrapped below as the per-component "Acervo.download"
+      // interval; both intervals share the modelResolver subsystem so
+      // Instruments groups them under one lane.
+      #if MLXAUDIO_TELEMETRY_FULL
+      if Telemetry.level >= .operations {
+        try await Telemetry.emitIntervalAsync(
+          name: "ModelResolver.resolve",
+          family: .modelResolver,
+          message: modelRepo.rawValue
+        ) {
+          try await Telemetry.emitIntervalAsync(
+            name: "Acervo.download",
+            family: .modelResolver,
+            message: modelRepo.componentId
+          ) {
+            try await Acervo.ensureComponentReady(
+              modelRepo.componentId,
+              progress: progress
+            )
+          }
+        }
+      } else {
+        try await Acervo.ensureComponentReady(
+          modelRepo.componentId,
+          progress: progress
+        )
+      }
+      #else
+      // Use Acervo to ensure component is downloaded and ready
+      try await Acervo.ensureComponentReady(
+        modelRepo.componentId,
+        progress: progress
+      )
+      #endif
+    } catch {
+      await emit(.modelDownloadError(repo: modelRepo.rawValue, error: String(describing: error)))
+      throw error
+    }
+
+    await emit(
+      .modelDownloadComplete(
+        repo: modelRepo.rawValue,
+        sizeMB: estimatedSizeMB ?? 0.0,
+        cacheHit: wasReadyBefore
+      )
     )
   }
 
@@ -783,13 +962,41 @@ public enum AudioModelManager {
     progress: (@Sendable (AcervoDownloadProgress) -> Void)? = nil,
     _ body: @escaping (URL) async throws -> R
   ) async throws -> R {
-    // Ensure registration and readiness
+    // Ensure registration and readiness — `ensureModelReady` emits its
+    // own `modelDownloadStart` / `modelDownloadComplete` /
+    // `modelDownloadError` events, so we do not double-emit them
+    // here. This wrapper owns the *load* lifecycle pair only.
     ensureComponentsRegistered()
     try await ensureModelReady(modelRepo, progress: progress)
 
     // Get model directory and execute body
     let modelDir = try Acervo.modelDirectory(for: modelRepo.rawValue)
-    return try await body(modelDir)
+
+    let descriptor = Acervo.component(modelRepo.componentId)
+    let modelType = descriptor?.metadata["modelType"] ?? "unknown"
+    await emit(.modelLoadStart(repo: modelRepo.rawValue, modelType: modelType))
+
+    let result: R
+    do {
+      result = try await body(modelDir)
+    } catch {
+      await emit(.modelLoadError(repo: modelRepo.rawValue, error: String(describing: error)))
+      throw error
+    }
+
+    await emit(
+      .modelLoadComplete(
+        repo: modelRepo.rawValue,
+        modelType: modelType,
+        sizeMB: sizeMB(for: descriptor),
+        metalAllocatedMB: sampleMetalAllocatedMB()
+      )
+    )
+    // Sortie 5: forward the post-load Metal reading to the shared
+    // sampler so a `metalBufferAllocated` event is emitted when the
+    // delta vs. the previous load boundary exceeds 10 MB.
+    await sampleMetalForLoadBoundary()
+    return result
   }
 
   /// Strict, descriptor-required loader that funnels every codec/LM weight load
@@ -833,29 +1040,60 @@ public enum AudioModelManager {
     _ = _registerAudioComponents
 
     guard let descriptor = Acervo.component(componentId) else {
+      // Registry lookup failure is the load on-ramp; treat as a load
+      // error with `componentId` as the repo identifier (no
+      // `repoId` known yet — we never had a descriptor).
+      await emit(
+        .modelLoadError(
+          repo: componentId,
+          error: String(describing: AcervoError.componentNotRegistered(componentId))
+        )
+      )
       throw AcervoError.componentNotRegistered(componentId)
     }
 
-    // S10 Sortie 10: Acervo.download per-component interval (Level 2 =
-    // .operations). Wraps the network/disk download phase only; the
-    // synchronous `load` closure that follows runs the model construction
-    // and weight load — those are wrapped at their own call sites in each
-    // model family.
-    #if MLXAUDIO_TELEMETRY_FULL
-    if Telemetry.level >= .operations {
-      try await Telemetry.emitIntervalAsync(
-        name: "Acervo.download",
-        family: .modelResolver,
-        message: componentId
-      ) {
+    let resolvedRepo = descriptor.repoId
+    let estimatedSizeMB = Double(descriptor.estimatedSizeBytes) / (1024.0 * 1024.0)
+    let wasReadyBefore = Acervo.isComponentReady(componentId)
+    let modelType = descriptor.metadata["modelType"] ?? "unknown"
+
+    await emit(.modelDownloadStart(repo: resolvedRepo, sizeMB: estimatedSizeMB))
+
+    do {
+      // S10 Sortie 10: Acervo.download per-component interval (Level 2 =
+      // .operations). Wraps the network/disk download phase only; the
+      // synchronous `load` closure that follows runs the model construction
+      // and weight load — those are wrapped at their own call sites in each
+      // model family.
+      #if MLXAUDIO_TELEMETRY_FULL
+      if Telemetry.level >= .operations {
+        try await Telemetry.emitIntervalAsync(
+          name: "Acervo.download",
+          family: .modelResolver,
+          message: componentId
+        ) {
+          try await Acervo.ensureComponentReady(componentId)
+        }
+      } else {
         try await Acervo.ensureComponentReady(componentId)
       }
-    } else {
+      #else
       try await Acervo.ensureComponentReady(componentId)
+      #endif
+    } catch {
+      await emit(.modelDownloadError(repo: resolvedRepo, error: String(describing: error)))
+      throw error
     }
-    #else
-    try await Acervo.ensureComponentReady(componentId)
-    #endif
+
+    await emit(
+      .modelDownloadComplete(
+        repo: resolvedRepo,
+        sizeMB: estimatedSizeMB,
+        cacheHit: wasReadyBefore
+      )
+    )
+
+    await emit(.modelLoadStart(repo: resolvedRepo, modelType: modelType))
 
     // REQUIREMENTS.md:86 — `load` runs inside `withComponentAccess` so locking
     // and SHA verification cannot be bypassed. SwiftAcervo's `perform:` closure
@@ -867,10 +1105,29 @@ public enum AudioModelManager {
     // constructed once and handed back to the caller, never shared across
     // actors. We launder the result through an `@unchecked Sendable` box so
     // callers can return any T without marking their model types Sendable.
-    let box: _LoadBox<T> = try await AcervoManager.shared.withComponentAccess(componentId) { @Sendable _ in
-      let modelDir = try Acervo.modelDirectory(for: descriptor.repoId)
-      return _LoadBox(value: try load(modelDir))
+    let box: _LoadBox<T>
+    do {
+      box = try await AcervoManager.shared.withComponentAccess(componentId) { @Sendable _ in
+        let modelDir = try Acervo.modelDirectory(for: descriptor.repoId)
+        return _LoadBox(value: try load(modelDir))
+      }
+    } catch {
+      await emit(.modelLoadError(repo: resolvedRepo, error: String(describing: error)))
+      throw error
     }
+
+    await emit(
+      .modelLoadComplete(
+        repo: resolvedRepo,
+        modelType: modelType,
+        sizeMB: estimatedSizeMB,
+        metalAllocatedMB: sampleMetalAllocatedMB()
+      )
+    )
+    // Sortie 5: forward the post-load Metal reading to the shared
+    // sampler so a `metalBufferAllocated` event is emitted when the
+    // delta vs. the previous load boundary exceeds 10 MB.
+    await sampleMetalForLoadBoundary()
     return box.value
   }
 }
@@ -903,12 +1160,55 @@ extension AudioModelManager {
   ) async throws -> R where T.RawValue == String {
     ensureComponentsRegistered()
 
-    // Ensure component is ready
-    try await Acervo.ensureComponentReady(componentId, progress: progress)
+    let descriptor = Acervo.component(componentId)
+    let estimatedSizeMB: Double? = descriptor.map {
+      Double($0.estimatedSizeBytes) / (1024.0 * 1024.0)
+    }
+    let modelType = descriptor?.metadata["modelType"] ?? "unknown"
+    let resolvedRepo = modelRepo.rawValue
+    let wasReadyBefore = Acervo.isComponentReady(componentId)
 
-    // Get model directory and execute body
+    // Ensure component is ready — emit the download lifecycle pair
+    // around it.
+    await emit(.modelDownloadStart(repo: resolvedRepo, sizeMB: estimatedSizeMB))
+    do {
+      try await Acervo.ensureComponentReady(componentId, progress: progress)
+    } catch {
+      await emit(.modelDownloadError(repo: resolvedRepo, error: String(describing: error)))
+      throw error
+    }
+    await emit(
+      .modelDownloadComplete(
+        repo: resolvedRepo,
+        sizeMB: estimatedSizeMB ?? 0.0,
+        cacheHit: wasReadyBefore
+      )
+    )
+
+    // Get model directory and execute body — emit the load lifecycle
+    // pair around the user's closure.
     let modelDir = try Acervo.modelDirectory(for: modelRepo.rawValue)
-    return try await body(modelDir)
+    await emit(.modelLoadStart(repo: resolvedRepo, modelType: modelType))
+    let result: R
+    do {
+      result = try await body(modelDir)
+    } catch {
+      await emit(.modelLoadError(repo: resolvedRepo, error: String(describing: error)))
+      throw error
+    }
+    await emit(
+      .modelLoadComplete(
+        repo: resolvedRepo,
+        modelType: modelType,
+        sizeMB: sizeMB(for: descriptor),
+        metalAllocatedMB: sampleMetalAllocatedMB()
+      )
+    )
+    // Sortie 5: forward the post-load Metal reading to the shared
+    // sampler so a `metalBufferAllocated` event is emitted when the
+    // delta vs. the previous load boundary exceeds 10 MB.
+    await sampleMetalForLoadBoundary()
+    return result
   }
 }
 

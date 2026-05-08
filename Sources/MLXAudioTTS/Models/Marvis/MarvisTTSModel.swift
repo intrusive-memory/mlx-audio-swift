@@ -11,22 +11,48 @@ public final class MarvisTTSModel: Module {
         case conversationalA = "conversational_a"
         case conversationalB = "conversational_b"
     }
-    
+
     public enum QualityLevel: Int, Sendable {
         case low = 8
         case medium = 16
         case high = 24
         case maximum = 32
     }
-    
+
     public let sampleRate: Int
-    
+
     private let model: CSMModel
     private let _promptURLs: [URL]?
     private let _textTokenizer: Tokenizers.Tokenizer
     private let _audio_tokenizer: MimiTokenizer
     private let _streamingDecoder: MimiStreamingDecoder
-    
+
+    // MARK: - Telemetry (OPERATION SILENT STETHOSCOPE — Sortie 11)
+
+    /// Attached telemetry reporter. `nil` by default — zero runtime cost
+    /// when no reporter is set (invariant 3 from REQUIREMENTS §6).
+    private var telemetry: (any MLXAudioTelemetryReporter)? = nil
+
+    /// Attach or detach a telemetry reporter.
+    ///
+    /// Call before the first `generate*` invocation. Passing `nil`
+    /// detaches the reporter and restores the zero-cost default.
+    ///
+    /// - Parameter reporter: Reporter to attach, or `nil` to detach.
+    public func setTelemetry(_ reporter: (any MLXAudioTelemetryReporter)?) {
+        self.telemetry = reporter
+    }
+
+    /// Canonical per-instance emit helper (copied verbatim from
+    /// `MLXAudioTelemetryReporter.swift` doc comment).
+    ///
+    /// The `@autoclosure` ensures payload construction (string formatting,
+    /// arithmetic) is elided entirely when `telemetry` is `nil`.
+    private func emit(_ event: @autoclosure () -> MLXAudioTelemetryEvent) async {
+        guard let telemetry else { return }
+        await telemetry.capture(event())
+    }
+
     public init(
         config: CSMModelArgs,
         repoId: String,
@@ -349,18 +375,39 @@ public extension MarvisTTSModel {
         splitPattern: String? = #"(\n+)"#,
         streamingInterval: Double = 0.5
     ) async throws -> [Float] {
-        var out: [GenerationResult] = []
-        for try await chunk in generate(
-            text: text,
-            voice: voice,
-            qualityLevel: qualityLevel,
-            refAudio: refAudio,
-            refText: refText,
-            streamingInterval: streamingInterval
-        ) {
-            out.append(chunk)
+        let textLength = text.joined().count
+        let voiceLabel = voice?.rawValue
+        await emit(.ttsGenerationStart(model: "MarvisTTS", textLength: textLength, voiceType: voiceLabel))
+        do {
+            var out: [GenerationResult] = []
+            for try await chunk in generate(
+                text: text,
+                voice: voice,
+                qualityLevel: qualityLevel,
+                refAudio: refAudio,
+                refText: refText,
+                streamingInterval: streamingInterval
+            ) {
+                out.append(chunk)
+            }
+            let samples = out.map(\.audio).flatMap { $0 }
+            let totalSamples = samples.count
+            let durationSeconds = Double(totalSamples) / Double(sampleRate)
+            await emit(.ttsGenerationComplete(
+                model: "MarvisTTS",
+                durationSeconds: durationSeconds,
+                audioSamples: totalSamples,
+                sampleRate: sampleRate
+            ))
+            return samples
+        } catch {
+            await emit(.ttsGenerationError(
+                model: "MarvisTTS",
+                phase: "generate",
+                error: error.localizedDescription
+            ))
+            throw error
         }
-        return out.map(\.audio).flatMap { $0 }
     }
     
     func generate(
@@ -372,6 +419,8 @@ public extension MarvisTTSModel {
         splitPattern: String? = #"(\n+)"#,
         streamingInterval: Double = 0.5
     ) -> AsyncThrowingStream<GenerationResult, Error> {
+        // Telemetry: start/complete/error are emitted by the [String] streaming overload
+        // that this delegates to — no double-emission here.
         generate(
             text: Self.textPieces(text, splitPattern: splitPattern),
             voice: voice,
@@ -391,14 +440,32 @@ public extension MarvisTTSModel {
         streamingInterval: Double = 0.5
     ) -> AsyncThrowingStream<GenerationResult, Error> {
         let (stream, continuation) = AsyncThrowingStream<GenerationResult, Error>.makeStream()
-        
+        let totalTextLength = text.joined().count
+        let voiceLabel = voice?.rawValue
+        let capturedTelemetry = telemetry
+
         Task { @Sendable [weak self, continuation] in
             guard let self else { return }
+
+            // Canonical per-Task emit closure — captures the reporter reference
+            // snapshotted above so that setTelemetry changes mid-stream don't
+            // race with in-progress generation.
+            @Sendable func emitEvent(_ event: @autoclosure () -> MLXAudioTelemetryEvent) async {
+                guard let rep = capturedTelemetry else { return }
+                await rep.capture(event())
+            }
+
+            await emitEvent(.ttsGenerationStart(
+                model: "MarvisTTS",
+                textLength: totalTextLength,
+                voiceType: voiceLabel
+            ))
+
             do {
                 guard voice != nil || refAudio != nil else {
                     throw MarvisTTSModelError.invalidArgument("`voice` or `refAudio`/`refText` must be specified.")
                 }
-                
+
                 let context: Segment
                 if let refAudio, let refText {
                     context = Segment(speaker: 0, text: refText, audio: refAudio)
@@ -412,36 +479,40 @@ public extension MarvisTTSModel {
                     guard let refAudioURL else {
                         throw MarvisTTSModelError.voiceNotFound
                     }
-                    
+
                     let refTextURL = refAudioURL.deletingPathExtension().appendingPathExtension("txt")
                     let refText = try String(data: Data(contentsOf: refTextURL), encoding: .utf8)
                     guard let refText else {
                         throw MarvisTTSModelError.voiceNotFound
                     }
-                    
+
                     let (_, refAudio) = try loadAudioArray(from: refAudioURL)
                     context = Segment(speaker: 0, text: refText, audio: refAudio)
                 } else {
                     throw MarvisTTSModelError.voiceNotFound
                 }
-                
+
                 let maxAudioFrames = Int(60000 / 80.0) // 12.5 fps, 80 ms per frame
                 let streamingIntervalTokens = Int(streamingInterval * 12.5)
-                
+
+                // Accumulate total samples across all text segments for progress reporting.
+                var totalGeneratedSamples = 0
+                let segmentCount = text.count
+
             outerLoop:
-                for prompt in text {
+                for (segmentIndex, prompt) in text.enumerated() {
                     if Task.isCancelled { break outerLoop }
-                    
+
                     let generationText = (context.text + " " + prompt).trimmingCharacters(in: .whitespaces)
                     let seg = Segment(speaker: 0, text: generationText, audio: context.audio)
-                    
+
                     model.resetCaches()
                     _streamingDecoder.reset()
-                    
+
                     let (toks, masks) = try tokenizeSegment(seg, addEOS: false)
                     let promptTokens = toks.asType(Int32.self) // [T, K+1]
                     let promptMask = masks.asType(Bool.self) // [T, K+1]
-                    
+
                     var samplesFrames: [MLXArray] = [] // each is [B=1, K]
                     var currTokens = expandedDimensions(promptTokens, axis: 0) // [1, T, K+1]
                     var currMask = expandedDimensions(promptMask, axis: 0) // [1, T, K+1]
@@ -449,14 +520,14 @@ public extension MarvisTTSModel {
                     var generatedCount = 0
                     var yieldedCount = 0
                     var marvisTokenStep = 0
-                    
+
                     let maxSeqLen = 2048 - maxAudioFrames
                     precondition(currTokens.shape[1] < maxSeqLen, "Inputs too long, must be below max_seq_len - max_audio_frames: \(maxSeqLen)")
-                    
+
                     let sampleFn = TopPSampler(temperature: 0.9, topP: 0.8).sample
-                    
+
                     var startTime = CFAbsoluteTimeGetCurrent()
-                    
+
                     for _ in 0 ..< maxAudioFrames {
                         if Task.isCancelled { break outerLoop }
 
@@ -476,20 +547,20 @@ public extension MarvisTTSModel {
                         if frame.sum().item(Int32.self) == 0 {
                             break
                         }
-                        
+
                         samplesFrames.append(frame)
-                        
+
                         let zerosText = MLXArray.zeros([1, 1], type: Int32.self)
                         let nextFrame = concatenated([frame, zerosText], axis: 1) // [1, K+1]
                         currTokens = expandedDimensions(nextFrame, axis: 1) // [1, 1, K+1]
-                        
+
                         let onesK = ones([1, frame.shape[1]], type: Bool.self)
                         let zero1 = zeros([1, 1], type: Bool.self)
                         let nextMask = concatenated([onesK, zero1], axis: 1) // [1, K+1]
                         currMask = expandedDimensions(nextMask, axis: 1) // [1, 1, K+1]
-                        
+
                         currPos = split(currPos, indices: [currPos.shape[1] - 1], axis: 1)[1] + MLXArray(1)
-                        
+
                         generatedCount += 1
 
                         // S13: per-token signpost (Level 4 = .verbose). Strips in release builds.
@@ -508,15 +579,39 @@ public extension MarvisTTSModel {
                             startTime = CFAbsoluteTimeGetCurrent()
                         }
                     }
-                    
+
                     if !samplesFrames.isEmpty {
                         let gr = generateResultChunk(samplesFrames, start: startTime)
                         continuation.yield(gr)
+                        totalGeneratedSamples += gr.sampleCount
                     }
+
+                    // ttsGenerationProgress: emit at segment-complete checkpoints
+                    // (outside the inner decode loop — one emit per text segment).
+                    let fractionComplete = segmentCount > 0
+                        ? Double(segmentIndex + 1) / Double(segmentCount)
+                        : 1.0
+                    await emitEvent(.ttsGenerationProgress(
+                        model: "MarvisTTS",
+                        fractionComplete: fractionComplete,
+                        generatedSamples: totalGeneratedSamples
+                    ))
                 }
-                
+
+                let durationSeconds = Double(totalGeneratedSamples) / Double(sampleRate)
+                await emitEvent(.ttsGenerationComplete(
+                    model: "MarvisTTS",
+                    durationSeconds: durationSeconds,
+                    audioSamples: totalGeneratedSamples,
+                    sampleRate: sampleRate
+                ))
                 continuation.finish()
             } catch {
+                await emitEvent(.ttsGenerationError(
+                    model: "MarvisTTS",
+                    phase: "generate_stream",
+                    error: error.localizedDescription
+                ))
                 continuation.finish(throwing: error)
             }
         }
@@ -591,27 +686,53 @@ extension MarvisTTSModel: SpeechGenerationModel, @unchecked Sendable {
         instruct: String?,
         generationParameters: GenerateParameters
     ) async throws -> MLXArray {
-        // S11: MarvisTTS.generate interval (Level 2 = .operations).
-        #if MLXAUDIO_TELEMETRY_FULL
-        if Telemetry.level >= .operations {
-            return try await Telemetry.emitIntervalAsync(
-                name: "MarvisTTS.generate",
-                family: .marvisTTS,
-                message: text.prefix(64).description
-            ) {
-                try await self._marvisGenerateImpl(
-                    text: text, voice: voice, refAudio: refAudio, refText: refText,
-                    language: language, instruct: instruct,
-                    generationParameters: generationParameters
-                )
+        await emit(.ttsGenerationStart(model: "MarvisTTS", textLength: text.count, voiceType: voice))
+        do {
+            // S11: MarvisTTS.generate interval (Level 2 = .operations).
+            #if MLXAUDIO_TELEMETRY_FULL
+            if Telemetry.level >= .operations {
+                let result = try await Telemetry.emitIntervalAsync(
+                    name: "MarvisTTS.generate",
+                    family: .marvisTTS,
+                    message: text.prefix(64).description
+                ) {
+                    try await self._marvisGenerateImpl(
+                        text: text, voice: voice, refAudio: refAudio, refText: refText,
+                        language: language, instruct: instruct,
+                        generationParameters: generationParameters
+                    )
+                }
+                let audioSamples = result.shape.reduce(1, *)
+                await emit(.ttsGenerationComplete(
+                    model: "MarvisTTS",
+                    durationSeconds: Double(audioSamples) / Double(sampleRate),
+                    audioSamples: audioSamples,
+                    sampleRate: sampleRate
+                ))
+                return result
             }
+            #endif
+            let result = try await _marvisGenerateImpl(
+                text: text, voice: voice, refAudio: refAudio, refText: refText,
+                language: language, instruct: instruct,
+                generationParameters: generationParameters
+            )
+            let audioSamples = result.shape.reduce(1, *)
+            await emit(.ttsGenerationComplete(
+                model: "MarvisTTS",
+                durationSeconds: Double(audioSamples) / Double(sampleRate),
+                audioSamples: audioSamples,
+                sampleRate: sampleRate
+            ))
+            return result
+        } catch {
+            await emit(.ttsGenerationError(
+                model: "MarvisTTS",
+                phase: "generate",
+                error: error.localizedDescription
+            ))
+            throw error
         }
-        #endif
-        return try await _marvisGenerateImpl(
-            text: text, voice: voice, refAudio: refAudio, refText: refText,
-            language: language, instruct: instruct,
-            generationParameters: generationParameters
-        )
     }
 
     private func _marvisGenerateImpl(
@@ -650,14 +771,23 @@ extension MarvisTTSModel: SpeechGenerationModel, @unchecked Sendable {
         generationParameters: GenerateParameters
     ) -> AsyncThrowingStream<AudioGeneration, Error> {
         let (stream, continuation) = AsyncThrowingStream<AudioGeneration, Error>.makeStream()
-        
+        let capturedTelemetry = telemetry
+
         Task { @Sendable [weak self, continuation] in
             guard let self else { return }
-            
+
+            @Sendable func emitEvent(_ event: @autoclosure () -> MLXAudioTelemetryEvent) async {
+                guard let rep = capturedTelemetry else { return }
+                await rep.capture(event())
+            }
+
+            await emitEvent(.ttsGenerationStart(model: "MarvisTTS", textLength: text.count, voiceType: voice))
+
             do {
                 _ = generationParameters
                 let resolvedVoice = try resolveVoice(from: voice)
-                
+                var totalGeneratedSamples = 0
+
                 for try await chunk in generate(
                     text: text,
                     voice: resolvedVoice,
@@ -666,15 +796,28 @@ extension MarvisTTSModel: SpeechGenerationModel, @unchecked Sendable {
                     refText: refText,
                     streamingInterval: 0.5
                 ) {
+                    totalGeneratedSamples += chunk.sampleCount
                     continuation.yield(.audio(MLXArray(chunk.audio)))
                 }
-                
+
+                let durationSeconds = Double(totalGeneratedSamples) / Double(sampleRate)
+                await emitEvent(.ttsGenerationComplete(
+                    model: "MarvisTTS",
+                    durationSeconds: durationSeconds,
+                    audioSamples: totalGeneratedSamples,
+                    sampleRate: sampleRate
+                ))
                 continuation.finish()
             } catch {
+                await emitEvent(.ttsGenerationError(
+                    model: "MarvisTTS",
+                    phase: "generateStream",
+                    error: error.localizedDescription
+                ))
                 continuation.finish(throwing: error)
             }
         }
-        
+
         return stream
     }
 }

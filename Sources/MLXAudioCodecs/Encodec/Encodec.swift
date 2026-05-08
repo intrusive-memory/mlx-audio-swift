@@ -168,12 +168,52 @@ public class EncodecDecoder: Module {
 // MARK: - Encodec
 
 /// EnCodec neural audio codec.
+///
+/// ## Telemetry
+///
+/// Attach a reporter via ``setTelemetry(_:)`` to receive
+/// ``MLXAudioTelemetryEvent/codecEncodeStart(codec:inputSamples:)`` /
+/// ``MLXAudioTelemetryEvent/codecEncodeComplete(codec:durationSeconds:compressionRatio:)`` and
+/// ``MLXAudioTelemetryEvent/codecDecodeStart(codec:codedFrames:)`` /
+/// ``MLXAudioTelemetryEvent/codecDecodeComplete(codec:durationSeconds:outputSamples:)``
+/// (and ``MLXAudioTelemetryEvent/codecError(codec:operation:error:)`` on failure)
+/// at the public encode/decode boundaries.
+///
+/// Use the async overloads ``encode(_:paddingMask:bandwidth:)`` (async) and
+/// ``decode(_:_:paddingMask:)`` (async) to get telemetry emission;
+/// the synchronous overloads are retained for backward-compatible callers.
 public class Encodec: Module {
     public let config: EncodecConfig
 
     @ModuleInfo(key: "encoder") var encoder: EncodecEncoder
     @ModuleInfo(key: "decoder") var decoder: EncodecDecoder
     @ModuleInfo(key: "quantizer") var quantizer: EncodecResidualVectorQuantizer
+
+    // MARK: - Telemetry
+
+    /// Optional vendor-neutral telemetry reporter. `nil` by default — zero
+    /// overhead when no reporter is attached.
+    private var telemetry: (any MLXAudioTelemetryReporter)?
+
+    /// Attach or detach a telemetry reporter.
+    ///
+    /// Set to `nil` (the default) to disable telemetry entirely. Setting a
+    /// reporter enables ``MLXAudioTelemetryEvent`` emission at every public
+    /// encode/decode boundary.
+    public func setTelemetry(_ reporter: (any MLXAudioTelemetryReporter)?) {
+        self.telemetry = reporter
+    }
+
+    /// Canonical per-instance emit helper (copied verbatim from
+    /// `MLXAudioTelemetryReporter.swift` doc comment).
+    ///
+    /// The `@autoclosure` is load-bearing: when `telemetry` is `nil` the
+    /// closure is never evaluated, so payload-construction work (shape
+    /// reads, multiplications) is completely elided.
+    private func emit(_ event: @autoclosure () -> MLXAudioTelemetryEvent) async {
+        guard let telemetry else { return }
+        await telemetry.capture(event())
+    }
 
     public init(config: EncodecConfig) {
         self.config = config
@@ -242,7 +282,11 @@ public class Encodec: Module {
         return (codes, scale)
     }
 
-    /// Encodes the input audio waveform into discrete codes.
+    /// Encodes the input audio waveform into discrete codes (synchronous overload).
+    ///
+    /// This overload is retained for backward compatibility with existing
+    /// synchronous callers. No public-surface telemetry is emitted from
+    /// this path — use the `async` overload if you need telemetry.
     ///
     /// - Parameters:
     ///   - inputValues: The input audio waveform with shape (batch_size, sequence_length, channels).
@@ -264,6 +308,69 @@ public class Encodec: Module {
         }
         #endif
         return _encodecEncodeImpl(inputValues, paddingMask: paddingMask, bandwidth: bandwidth)
+    }
+
+    /// Encodes the input audio waveform into discrete codes with telemetry emission.
+    ///
+    /// Emits ``MLXAudioTelemetryEvent/codecEncodeStart(codec:inputSamples:)``
+    /// before encoding, then
+    /// ``MLXAudioTelemetryEvent/codecEncodeComplete(codec:durationSeconds:compressionRatio:)``
+    /// on success.
+    ///
+    /// `inputSamples` is `inputValues.shape[1]` (the sequence-length dimension).
+    /// `compressionRatio` = `Double(inputBytes) / Double(outputBytes)` where
+    /// `inputBytes = shape[1] × shape[2] × 4` (Float32 input) and
+    /// `outputBytes = total code elements × 4` (Int32 indices in the returned codes tensor).
+    /// If either byte count is zero the complete event is replaced by ``codecError``.
+    ///
+    /// Telemetry emission is a boundary-level operation — no events are emitted
+    /// inside the per-chunk encode loop.
+    ///
+    /// - Parameters:
+    ///   - inputValues: The input audio waveform with shape (batch_size, sequence_length, channels).
+    ///   - paddingMask: Optional padding mask.
+    ///   - bandwidth: The target bandwidth in kbps. Must be one of config.targetBandwidths.
+    ///
+    /// - Returns: A tuple of (codes, scales) where codes has shape (num_chunks, batch_size, num_codebooks, frames).
+    public func encode(
+        _ inputValues: MLXArray,
+        paddingMask: MLXArray? = nil,
+        bandwidth: Float? = nil
+    ) async -> (MLXArray, [MLXArray?]) {
+        // inputSamples: sequence-length dimension (index 1 of [batch, length, channels]).
+        let inputSamples: Int = inputValues.ndim >= 2 ? inputValues.shape[1] : inputValues.shape[0]
+
+        await emit(.codecEncodeStart(codec: "encodec", inputSamples: inputSamples))
+
+        let start = Date()
+        let result = _encodecEncodeImpl(inputValues, paddingMask: paddingMask, bandwidth: bandwidth)
+        let elapsed = Date().timeIntervalSince(start)
+
+        let codes = result.0
+        // inputBytes: sequence × channels × 4 (Float32)
+        let inputBytes = (inputValues.ndim >= 3
+            ? inputValues.shape[1] * inputValues.shape[2]
+            : inputSamples) * 4
+        // outputBytes: total number of code elements × 4 (Int32 indices)
+        let outputElements = codes.shape.reduce(1, *)
+        let outputBytes = outputElements * 4
+
+        if inputBytes > 0 && outputBytes > 0 {
+            let compressionRatio = Double(inputBytes) / Double(outputBytes)
+            await emit(.codecEncodeComplete(
+                codec: "encodec",
+                durationSeconds: elapsed,
+                compressionRatio: compressionRatio
+            ))
+        } else {
+            await emit(.codecError(
+                codec: "encodec",
+                operation: "encode",
+                error: "compressionRatio unavailable: inputBytes=\(inputBytes) outputBytes=\(outputBytes)"
+            ))
+        }
+
+        return result
     }
 
     private func _encodecEncodeImpl(
@@ -376,7 +483,11 @@ public class Encodec: Module {
         return MLXArray(outData).reshaped([N, totalSize, C])
     }
 
-    /// Decodes the given codes into an output audio waveform.
+    /// Decodes the given codes into an output audio waveform (synchronous overload).
+    ///
+    /// This overload is retained for backward compatibility with existing
+    /// synchronous callers. No public-surface telemetry is emitted from
+    /// this path — use the `async` overload if you need telemetry.
     ///
     /// - Parameters:
     ///   - audioCodes: Discrete code embeddings of shape (num_chunks, batch_size, num_codebooks, frames).
@@ -398,6 +509,59 @@ public class Encodec: Module {
         }
         #endif
         return _encodecDecodeImpl(audioCodes, audioScales, paddingMask: paddingMask)
+    }
+
+    /// Decodes the given codes into an output audio waveform with telemetry emission.
+    ///
+    /// Emits ``MLXAudioTelemetryEvent/codecDecodeStart(codec:codedFrames:)``
+    /// before decoding, then
+    /// ``MLXAudioTelemetryEvent/codecDecodeComplete(codec:durationSeconds:outputSamples:)``
+    /// on success.
+    ///
+    /// `codedFrames` is the number of frames in the codes tensor (the last dimension
+    /// of the `[num_chunks, batch, num_codebooks, frames]` shape, i.e. `audioCodes.shape[3]`
+    /// when ndim ≥ 4, falling back to the last dimension otherwise).
+    /// `outputSamples` is the sequence-length of the decoded audio waveform (dimension 1
+    /// of a `[batch, length, channels]` output).
+    ///
+    /// Telemetry emission is a boundary-level operation — no events are emitted
+    /// inside the per-chunk decode loop or the linear overlap-add kernel.
+    ///
+    /// - Parameters:
+    ///   - audioCodes: Discrete code embeddings of shape (num_chunks, batch_size, num_codebooks, frames).
+    ///   - audioScales: Scaling factor for each input chunk.
+    ///   - paddingMask: Optional padding mask.
+    ///
+    /// - Returns: The decoded audio waveform.
+    public func decode(
+        _ audioCodes: MLXArray,
+        _ audioScales: [MLXArray?],
+        paddingMask: MLXArray? = nil
+    ) async -> MLXArray {
+        // codedFrames: last dimension of [num_chunks, batch, num_codebooks, frames].
+        let codedFrames: Int = {
+            if audioCodes.ndim >= 4 {
+                return audioCodes.shape[3]
+            }
+            return audioCodes.shape[audioCodes.ndim - 1]
+        }()
+
+        await emit(.codecDecodeStart(codec: "encodec", codedFrames: codedFrames))
+
+        let start = Date()
+        let audioValues = _encodecDecodeImpl(audioCodes, audioScales, paddingMask: paddingMask)
+        let elapsed = Date().timeIntervalSince(start)
+
+        // outputSamples: sequence-length dimension (index 1 of [batch, length, channels]).
+        let outputSamples: Int = audioValues.ndim >= 2 ? audioValues.shape[1] : audioValues.shape[0]
+
+        await emit(.codecDecodeComplete(
+            codec: "encodec",
+            durationSeconds: elapsed,
+            outputSamples: outputSamples
+        ))
+
+        return audioValues
     }
 
     private func _encodecDecodeImpl(

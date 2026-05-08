@@ -284,9 +284,51 @@ public enum EncodecFeaturesError: Error {
 /// Vocos vocoder model for high-quality audio synthesis.
 ///
 /// Combines a feature extractor, backbone, and ISTFT head for audio reconstruction.
+///
+/// ## Telemetry
+///
+/// Attach a reporter via ``setTelemetry(_:)`` to receive
+/// ``MLXAudioTelemetryEvent/codecDecodeStart(codec:codedFrames:)`` and
+/// ``MLXAudioTelemetryEvent/codecDecodeComplete(codec:durationSeconds:outputSamples:)``
+/// (and ``MLXAudioTelemetryEvent/codecError(codec:operation:error:)`` on failure)
+/// at the public decode boundary.
+///
+/// Vocos is a pure vocoder — it converts feature frames to audio waveform
+/// and therefore exposes only decode telemetry events (no encode path).
+///
+/// Use the async ``decode(_:bandwidthId:)`` overload to get telemetry emission;
+/// the synchronous overload is retained for backward-compatible callers.
 public class Vocos: Module {
     @ModuleInfo(key: "backbone") var backbone: VocosBackbone
     @ModuleInfo(key: "head") var head: ISTFTHead
+
+    // MARK: - Telemetry
+
+    /// Optional vendor-neutral telemetry reporter. `nil` by default — zero
+    /// overhead when no reporter is attached.
+    private var telemetry: (any MLXAudioTelemetryReporter)?
+
+    /// Attach or detach a telemetry reporter.
+    ///
+    /// Set to `nil` (the default) to disable telemetry entirely. Setting a
+    /// reporter enables ``MLXAudioTelemetryEvent`` emission at every public
+    /// decode boundary.
+    public func setTelemetry(_ reporter: (any MLXAudioTelemetryReporter)?) {
+        self.telemetry = reporter
+    }
+
+    /// Canonical per-instance emit helper (copied verbatim from
+    /// `MLXAudioTelemetryReporter.swift` doc comment).
+    ///
+    /// The `@autoclosure` is load-bearing: when `telemetry` is `nil` the
+    /// closure is never evaluated, so payload-construction work (shape
+    /// reads, multiplications) is completely elided.
+    private func emit(_ event: @autoclosure () -> MLXAudioTelemetryEvent) async {
+        guard let telemetry else { return }
+        await telemetry.capture(event())
+    }
+
+    // MARK: - Lifecycle
 
     public init(
         backbone: VocosBackbone,
@@ -302,8 +344,13 @@ public class Vocos: Module {
         Telemetry.trackLifecycleEnd(className: "Vocos.Model")
     }
 
-    /// Decode features to audio waveform.
-    public func decode(_ features: MLXArray, bandwidthId: MLXArray? = nil) -> MLXArray {
+    // MARK: - Decode implementation (private)
+
+    /// Internal synchronous implementation shared by the public sync and
+    /// async decode overloads. Keeping the computation in a private method
+    /// avoids overload-resolution ambiguity when the async overload calls
+    /// the sync one.
+    private func _decodeImpl(_ features: MLXArray, bandwidthId: MLXArray?) -> MLXArray {
         // S11: Vocos.decode interval (Level 2 = .operations).
         #if MLXAUDIO_TELEMETRY_FULL
         if Telemetry.level >= .operations {
@@ -319,7 +366,84 @@ public class Vocos: Module {
         return audioOutput
     }
 
+    // MARK: - Decode (synchronous — backward-compatible)
+
+    /// Decode features to audio waveform (synchronous overload).
+    ///
+    /// This overload is retained for backward compatibility with existing
+    /// synchronous callers. No public-surface telemetry is emitted from
+    /// this path — use the ``async`` overload if you need telemetry.
+    public func decode(_ features: MLXArray, bandwidthId: MLXArray? = nil) -> MLXArray {
+        return _decodeImpl(features, bandwidthId: bandwidthId)
+    }
+
+    // MARK: - Decode (async — instrumented)
+
+    /// Decode features to audio waveform with telemetry emission.
+    ///
+    /// Emits ``MLXAudioTelemetryEvent/codecDecodeStart(codec:codedFrames:)``
+    /// before the backbone+ISTFT pass, then
+    /// ``MLXAudioTelemetryEvent/codecDecodeComplete(codec:durationSeconds:outputSamples:)``
+    /// on success.
+    ///
+    /// Vocos is a pure vocoder and has no encode path — no
+    /// ``MLXAudioTelemetryEvent/codecEncodeStart`` or
+    /// ``MLXAudioTelemetryEvent/codecEncodeComplete`` events are emitted.
+    ///
+    /// `codedFrames` is the number of time frames in the feature tensor
+    /// (dimension 1 of a `[batch, frames, channels]` input). Telemetry
+    /// emission is a boundary-level operation — no events are emitted inside
+    /// the ConvNeXt block loop or the per-batch ISTFT overlap-add loop.
+    ///
+    /// - Parameters:
+    ///   - features: Input feature tensor. Shape `[B, L, C]` (or `[B, C, L]`;
+    ///     the backbone handles the transpose internally).
+    ///   - bandwidthId: Optional bandwidth-conditioning embedding for
+    ///     adaptive-norm backbones.
+    /// - Returns: Audio waveform tensor.
+    public func decode(_ features: MLXArray, bandwidthId: MLXArray? = nil) async -> MLXArray {
+        // Determine the number of coded frames at the boundary (before any
+        // computation). We read the middle dimension of the raw input.
+        // For non-3-D inputs (degenerate / unit-batch) we fall back to
+        // the first dimension.
+        let codedFrames: Int = {
+            if features.ndim >= 3 {
+                return features.shape[1]
+            }
+            return features.shape[0]
+        }()
+
+        await emit(.codecDecodeStart(codec: "vocos", codedFrames: codedFrames))
+
+        let start = Date()
+        let audioOutput = _decodeImpl(features, bandwidthId: bandwidthId)
+        let elapsed = Date().timeIntervalSince(start)
+
+        // Output sample count: for ≥2-D output [B, samples] we sum all
+        // dimensions after the batch; for 1-D output the single dimension
+        // is the sample count.
+        let outputSamples: Int = {
+            if audioOutput.ndim >= 2 {
+                return audioOutput.shape.dropFirst().reduce(1, *)
+            }
+            return audioOutput.shape[0]
+        }()
+
+        await emit(.codecDecodeComplete(
+            codec: "vocos",
+            durationSeconds: elapsed,
+            outputSamples: outputSamples
+        ))
+
+        return audioOutput
+    }
+
+    // MARK: - callAsFunction (synchronous — backward-compatible)
+
     /// Forward pass: extract features and decode to audio.
+    ///
+    /// Delegates to the synchronous ``decode(_:bandwidthId:)`` overload.
+    /// For telemetry, call ``decode(_:bandwidthId:)`` from an `async` context.
     public func callAsFunction(_ features: MLXArray, bandwidthId: MLXArray? = nil) -> MLXArray {
         return decode(features, bandwidthId: bandwidthId)
     }

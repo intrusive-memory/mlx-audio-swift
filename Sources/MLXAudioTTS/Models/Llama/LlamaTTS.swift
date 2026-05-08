@@ -359,6 +359,32 @@ public class LlamaTTSModel: Module, KVCacheDimensionProvider, SpeechGenerationMo
     private let model: LlamaTTSModelInner
     let configuration: LlamaTTSConfiguration
 
+    // MARK: - Telemetry (OPERATION SILENT STETHOSCOPE — Sortie 9)
+
+    /// Attached telemetry reporter. `nil` by default — zero runtime cost
+    /// when no reporter is set (invariant 3 from REQUIREMENTS §6).
+    private var telemetry: (any MLXAudioTelemetryReporter)? = nil
+
+    /// Attach or detach a telemetry reporter.
+    ///
+    /// Call before the first `generate*` invocation. Passing `nil`
+    /// detaches the reporter and restores the zero-cost default.
+    ///
+    /// - Parameter reporter: Reporter to attach, or `nil` to detach.
+    public func setTelemetry(_ reporter: (any MLXAudioTelemetryReporter)?) {
+        self.telemetry = reporter
+    }
+
+    /// Canonical per-instance emit helper (copied verbatim from
+    /// `MLXAudioTelemetryReporter.swift` doc comment).
+    ///
+    /// The `@autoclosure` ensures payload construction (string formatting,
+    /// arithmetic) is elided entirely when `telemetry` is `nil`.
+    private func emit(_ event: @autoclosure () -> MLXAudioTelemetryEvent) async {
+        guard let telemetry else { return }
+        await telemetry.capture(event())
+    }
+
     @ModuleInfo(key: "lm_head") var lmHead: Linear?
 
     public var numLayers: Int {
@@ -613,33 +639,61 @@ public class LlamaTTSModel: Module, KVCacheDimensionProvider, SpeechGenerationMo
         instruct _: String?,
         generationParameters: GenerateParameters
     ) async throws -> MLXArray {
-        // S11: LlamaTTS.generate interval (Level 2 = .operations).
-        #if MLXAUDIO_TELEMETRY_FULL
-        if Telemetry.level >= .operations {
-            return try await Telemetry.emitIntervalAsync(
-                name: "LlamaTTS.generate",
-                family: .llamaTTS,
-                message: text.prefix(64).description
-            ) {
-                try await self.generate(
-                    text: text,
-                    voice: voice,
-                    refAudio: refAudio,
-                    refText: refText,
-                    cache: nil,
-                    parameters: generationParameters
-                )
+        let modelName = "LlamaTTS"
+        await emit(.ttsGenerationStart(model: modelName, textLength: text.count, voiceType: voice))
+        let generateStart = Date()
+        do {
+            // S11: LlamaTTS.generate interval (Level 2 = .operations).
+            #if MLXAUDIO_TELEMETRY_FULL
+            if Telemetry.level >= .operations {
+                let audio = try await Telemetry.emitIntervalAsync(
+                    name: "LlamaTTS.generate",
+                    family: .llamaTTS,
+                    message: text.prefix(64).description
+                ) {
+                    try await self.generate(
+                        text: text,
+                        voice: voice,
+                        refAudio: refAudio,
+                        refText: refText,
+                        cache: nil,
+                        parameters: generationParameters
+                    )
+                }
+                let durationSeconds = Date().timeIntervalSince(generateStart)
+                await emit(.ttsGenerationComplete(
+                    model: modelName,
+                    durationSeconds: durationSeconds,
+                    audioSamples: audio.dim(0),
+                    sampleRate: sampleRate
+                ))
+                return audio
             }
+            #endif
+            let audio = try await generate(
+                text: text,
+                voice: voice,
+                refAudio: refAudio,
+                refText: refText,
+                cache: nil,
+                parameters: generationParameters
+            )
+            let durationSeconds = Date().timeIntervalSince(generateStart)
+            await emit(.ttsGenerationComplete(
+                model: modelName,
+                durationSeconds: durationSeconds,
+                audioSamples: audio.dim(0),
+                sampleRate: sampleRate
+            ))
+            return audio
+        } catch {
+            await emit(.ttsGenerationError(
+                model: modelName,
+                phase: "generate",
+                error: String(describing: error)
+            ))
+            throw error
         }
-        #endif
-        return try await generate(
-            text: text,
-            voice: voice,
-            refAudio: refAudio,
-            refText: refText,
-            cache: nil,
-            parameters: generationParameters
-        )
     }
 
     public func generateStream(
@@ -651,14 +705,79 @@ public class LlamaTTSModel: Module, KVCacheDimensionProvider, SpeechGenerationMo
         instruct _: String?,
         generationParameters: GenerateParameters
     ) -> AsyncThrowingStream<AudioGeneration, Error> {
-        generateStream(
-            text: text,
-            voice: voice,
-            refAudio: refAudio,
-            refText: refText,
-            cache: nil,
-            parameters: generationParameters
-        )
+        let modelName = "LlamaTTS"
+        let maxTokens = generationParameters.maxTokens ?? 1200
+        let (stream, continuation) = AsyncThrowingStream<AudioGeneration, Error>.makeStream()
+        Task { @Sendable [weak self] in
+            guard let self else { return }
+            let generateStart = Date()
+            await self.emit(.ttsGenerationStart(model: modelName, textLength: text.count, voiceType: voice))
+            do {
+                // Collect all yields from the inner stream, tracking token count
+                // so we can emit a single ttsGenerationProgress AFTER the inner
+                // loop completes — never inside the per-token decode loop body
+                // (REQUIREMENTS §7 anti-pattern compliance).
+                var tokenCount = 0
+                var lastAudio: MLXArray? = nil
+
+                let inner = self.generateStream(
+                    text: text,
+                    voice: voice,
+                    refAudio: refAudio,
+                    refText: refText,
+                    cache: nil,
+                    parameters: generationParameters
+                )
+
+                for try await generation in inner {
+                    switch generation {
+                    case .token:
+                        tokenCount += 1
+                    case .audio(let audio):
+                        lastAudio = audio
+                    default:
+                        break
+                    }
+                    continuation.yield(generation)
+                }
+
+                // Emit ttsGenerationProgress at a single fraction-complete checkpoint
+                // AFTER the inner stream has finished — outside every loop body.
+                // (REQUIREMENTS §7: no await emit( inside any for/while loop body.)
+                let fractionComplete = tokenCount > 0
+                    ? min(1.0, Double(tokenCount) / Double(max(maxTokens, 1)))
+                    : 1.0
+                let estimatedSamples: Int
+                if let audio = lastAudio {
+                    estimatedSamples = audio.dim(0)
+                } else {
+                    estimatedSamples = Int(fractionComplete * Double(sampleRate) * Double(text.count) / 10.0)
+                }
+                await self.emit(.ttsGenerationProgress(
+                    model: modelName,
+                    fractionComplete: fractionComplete,
+                    generatedSamples: max(0, estimatedSamples)
+                ))
+
+                let durationSeconds = Date().timeIntervalSince(generateStart)
+                let audioSamples = lastAudio.map { $0.dim(0) } ?? estimatedSamples
+                await self.emit(.ttsGenerationComplete(
+                    model: modelName,
+                    durationSeconds: durationSeconds,
+                    audioSamples: audioSamples,
+                    sampleRate: self.sampleRate
+                ))
+                continuation.finish()
+            } catch {
+                await self.emit(.ttsGenerationError(
+                    model: modelName,
+                    phase: "generateStream",
+                    error: String(describing: error)
+                ))
+                continuation.finish(throwing: error)
+            }
+        }
+        return stream
     }
 
     // MARK: - Generation

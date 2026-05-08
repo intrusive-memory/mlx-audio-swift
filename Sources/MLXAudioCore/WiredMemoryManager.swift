@@ -12,6 +12,43 @@
 import Foundation
 @preconcurrency import MLX
 
+// MARK: - Telemetry storage (Sortie 5 — OPERATION SILENT STETHOSCOPE)
+
+/// File-private actor that holds the optional public-telemetry reporter
+/// for the `WiredMemoryManager` namespace.
+///
+/// `WiredMemoryManager` is a `public enum` with only `static` members,
+/// so the canonical per-instance `private var telemetry: ...?` storage
+/// from `MLXAudioTelemetryReporter.swift`'s doc comment cannot live on
+/// `self`. Mirroring the pattern established by Sortie 2 in
+/// `AudioModelManager.swift`, we hold the reporter inside a single
+/// file-private actor and expose the canonical `setTelemetry(_:)` /
+/// `emit(_:)` shape through `static` wrappers on `WiredMemoryManager`.
+///
+/// The `@autoclosure` deferral semantics of the canonical helper are
+/// preserved: payload-construction (Metal sampling, `Memory.activeMemory`
+/// reads, byte-to-MB conversions) only runs after we have read a
+/// non-`nil` reporter out of the actor. With no reporter attached the
+/// `event()` autoclosure is never invoked, satisfying invariant 6 of
+/// REQUIREMENTS-telemetry.md §6.
+private actor _WiredMemoryManagerTelemetryStorage {
+    static let shared = _WiredMemoryManagerTelemetryStorage()
+
+    private var telemetry: (any MLXAudioTelemetryReporter)?
+
+    private init() {
+        self.telemetry = nil
+    }
+
+    func set(_ reporter: (any MLXAudioTelemetryReporter)?) {
+        self.telemetry = reporter
+    }
+
+    func current() -> (any MLXAudioTelemetryReporter)? {
+        telemetry
+    }
+}
+
 // MARK: - WiredMemoryManager
 
 /// Manages wired (pinned) memory for MLX model weights.
@@ -46,6 +83,55 @@ import Foundation
 /// print("Max wirable: \(info.maxWirableBytes / 1_000_000)MB")
 /// ```
 public enum WiredMemoryManager {
+
+    // MARK: - Public Telemetry API (Sortie 5 — OPERATION SILENT STETHOSCOPE)
+
+    /// Attach (or detach) a vendor-neutral telemetry reporter.
+    ///
+    /// Pass `nil` (the default state) to silence the namespace; with no
+    /// reporter attached every emission site short-circuits before any
+    /// payload construction runs (Metal sampling, `Memory.activeMemory`
+    /// reads, etc.) — see invariant 3 / 6 of
+    /// `REQUIREMENTS-telemetry.md §6` and the canonical `emit(_:)`
+    /// snippet documented in `MLXAudioTelemetryReporter.swift`.
+    ///
+    /// `WiredMemoryManager` is a `public enum` with only `static`
+    /// members, so storage lives in a file-private actor
+    /// (`_WiredMemoryManagerTelemetryStorage`). The setter is `async`
+    /// because it forwards to that actor; this matches the
+    /// static-namespace shape Sortie 2 established for
+    /// `AudioModelManager`.
+    public static func setTelemetry(_ reporter: (any MLXAudioTelemetryReporter)?) async {
+        await _WiredMemoryManagerTelemetryStorage.shared.set(reporter)
+    }
+
+    // MARK: - Internal Telemetry Helpers
+
+    /// Canonical per-namespace `emit(_:)` helper for the public telemetry
+    /// surface. Adapted from the 4-line snippet documented in
+    /// `MLXAudioTelemetryReporter.swift` to the static-namespace shape:
+    /// the actor read replaces the per-instance `guard let telemetry`
+    /// check, but the `@autoclosure` deferral semantics are preserved.
+    ///
+    /// The `@autoclosure` is load-bearing — payload construction only
+    /// runs when `reporter` is non-`nil`, so any expensive sampling
+    /// inside the call site (e.g. `Memory.activeMemory`,
+    /// byte-to-MB math) is elided whenever telemetry is detached.
+    private static func emit(_ event: @autoclosure () -> MLXAudioTelemetryEvent) async {
+        guard let reporter = await _WiredMemoryManagerTelemetryStorage.shared.current() else { return }
+        await reporter.capture(event())
+    }
+
+    /// Convert a byte count to MB as a `Double`. Centralized so every
+    /// payload site uses the same divisor and so the call site of
+    /// every conversion is auditable via `grep`.
+    private static func bytesToMB(_ bytes: Int) -> Double {
+        Double(bytes) / (1024.0 * 1024.0)
+    }
+
+    private static func bytesToMB(_ bytes: UInt64) -> Double {
+        Double(bytes) / (1024.0 * 1024.0)
+    }
 
     // MARK: - System Info
 
@@ -125,11 +211,48 @@ public enum WiredMemoryManager {
 
         print("[WiredMemoryManager] Pinning up to \(resolvedLimit / 1_000_000)MB of GPU memory (max: \(info.maxWirableBytes / 1_000_000)MB)")
 
+        // Public telemetry (Sortie 5): emit a `wiredMemoryState`
+        // snapshot at the entry boundary, after the wired limit is
+        // resolved and just before the wired-memory scope opens. We do
+        // not introduce a new sampling timer; this is the existing
+        // coarse-grained boundary already used by the manager (see
+        // REQUIREMENTS §2.6). The emission goes through the canonical
+        // `emit(_:)` helper, which short-circuits when no reporter is
+        // attached — `Memory.activeMemory` is therefore never read in
+        // the silent default.
+        //
+        // The sync overload schedules the async emission as a detached
+        // Task so the existing synchronous signature (`rethrows -> R`)
+        // is preserved. The Task's payload work still respects the
+        // `@autoclosure` deferral inside `emit(_:)` — when no reporter
+        // is attached the closure is never invoked.
+        Task {
+            await emit(
+                .wiredMemoryState(
+                    wiredMB: bytesToMB(resolvedLimit),
+                    committedMB: bytesToMB(Memory.activeMemory)
+                )
+            )
+        }
+
         let result = try Memory.withWiredLimit(resolvedLimit) {
             try body()
         }
 
         print("[WiredMemoryManager] Wired memory released.")
+
+        // Exit-boundary `wiredMemoryState` snapshot. `wiredMB == 0.0`
+        // signals the wired scope has been released; `committedMB` is
+        // the post-release `Memory.activeMemory` reading.
+        Task {
+            await emit(
+                .wiredMemoryState(
+                    wiredMB: 0.0,
+                    committedMB: bytesToMB(Memory.activeMemory)
+                )
+            )
+        }
+
         return result
     }
 
@@ -160,11 +283,33 @@ public enum WiredMemoryManager {
 
         print("[WiredMemoryManager] Pinning up to \(resolvedLimit / 1_000_000)MB of GPU memory (max: \(info.maxWirableBytes / 1_000_000)MB)")
 
+        // Public telemetry (Sortie 5): entry-boundary `wiredMemoryState`
+        // snapshot. See the sync overload above for the full design
+        // rationale; the async overload can `await emit(...)` directly
+        // because it already lives in an `async` context.
+        await emit(
+            .wiredMemoryState(
+                wiredMB: bytesToMB(resolvedLimit),
+                committedMB: bytesToMB(Memory.activeMemory)
+            )
+        )
+
         let result = try await Memory.withWiredLimit(resolvedLimit) {
             try await body()
         }
 
         print("[WiredMemoryManager] Wired memory released.")
+
+        // Exit-boundary snapshot. `wiredMB == 0.0` signals the wired
+        // scope has been released; `committedMB` is the post-release
+        // `Memory.activeMemory` reading.
+        await emit(
+            .wiredMemoryState(
+                wiredMB: 0.0,
+                committedMB: bytesToMB(Memory.activeMemory)
+            )
+        )
+
         return result
     }
 
