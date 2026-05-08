@@ -3,7 +3,7 @@
 /// MLXAudio library version and metadata
 public enum MLXAudio {
     /// Current version of the MLXAudio library
-    public static let version = "0.8.0-dev"
+    public static let version = "0.8.1"
 
     /// Library name
     public static let name = "MLXAudio"
