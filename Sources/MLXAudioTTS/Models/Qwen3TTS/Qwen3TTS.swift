@@ -28,6 +28,32 @@ public final class Qwen3TTSModel: Module, SpeechGenerationModel, @unchecked Send
     /// The output audio sample rate in Hz (typically 24000).
     public var sampleRate: Int { config.sampleRate }
 
+    // MARK: - Telemetry (OPERATION SILENT STETHOSCOPE — Sortie 3)
+
+    /// Attached telemetry reporter. `nil` by default — zero runtime cost
+    /// when no reporter is set (invariant 3 from REQUIREMENTS §6).
+    private var telemetry: (any MLXAudioTelemetryReporter)? = nil
+
+    /// Attach or detach a telemetry reporter.
+    ///
+    /// Call before the first `generate*` invocation. Passing `nil`
+    /// detaches the reporter and restores the zero-cost default.
+    ///
+    /// - Parameter reporter: Reporter to attach, or `nil` to detach.
+    public func setTelemetry(_ reporter: (any MLXAudioTelemetryReporter)?) {
+        self.telemetry = reporter
+    }
+
+    /// Canonical per-instance emit helper (copied verbatim from
+    /// `MLXAudioTelemetryReporter.swift` doc comment).
+    ///
+    /// The `@autoclosure` ensures payload construction (string formatting,
+    /// arithmetic) is elided entirely when `telemetry` is `nil`.
+    private func emit(_ event: @autoclosure () -> MLXAudioTelemetryEvent) async {
+        guard let telemetry else { return }
+        await telemetry.capture(event())
+    }
+
 
     // MARK: - Initialization
     init(config: Qwen3TTSModelConfig) {
@@ -417,27 +443,57 @@ public final class Qwen3TTSModel: Module, SpeechGenerationModel, @unchecked Send
         instruct: String? = nil,
         generationParameters: GenerateParameters
     ) async throws -> MLXArray {
-        // S11: Qwen3TTS.generate interval (Level 2 = .operations).
-        #if MLXAUDIO_TELEMETRY_FULL
-        if Telemetry.level >= .operations {
-            return try await Telemetry.emitIntervalAsync(
-                name: "Qwen3TTS.generate",
-                family: .qwen3TTS,
-                message: text.prefix(64).description
-            ) {
-                try await self._generateImpl(
-                    text: text, voice: voice, refAudio: refAudio, refText: refText,
-                    language: language, instruct: instruct,
-                    generationParameters: generationParameters
-                )
+        let modelName = "Qwen3TTS"
+        await emit(.ttsGenerationStart(model: modelName, textLength: text.count, voiceType: voice))
+        let generateStart = Date()
+        do {
+            // S11: Qwen3TTS.generate interval (Level 2 = .operations).
+            #if MLXAUDIO_TELEMETRY_FULL
+            if Telemetry.level >= .operations {
+                let audio = try await Telemetry.emitIntervalAsync(
+                    name: "Qwen3TTS.generate",
+                    family: .qwen3TTS,
+                    message: text.prefix(64).description
+                ) {
+                    try await self._generateImpl(
+                        text: text, voice: voice, refAudio: refAudio, refText: refText,
+                        language: language, instruct: instruct,
+                        generationParameters: generationParameters
+                    )
+                }
+                let durationSeconds = Date().timeIntervalSince(generateStart)
+                let audioSamples = audio.dim(0)
+                await emit(.ttsGenerationComplete(
+                    model: modelName,
+                    durationSeconds: durationSeconds,
+                    audioSamples: audioSamples,
+                    sampleRate: sampleRate
+                ))
+                return audio
             }
+            #endif
+            let audio = try await _generateImpl(
+                text: text, voice: voice, refAudio: refAudio, refText: refText,
+                language: language, instruct: instruct,
+                generationParameters: generationParameters
+            )
+            let durationSeconds = Date().timeIntervalSince(generateStart)
+            let audioSamples = audio.dim(0)
+            await emit(.ttsGenerationComplete(
+                model: modelName,
+                durationSeconds: durationSeconds,
+                audioSamples: audioSamples,
+                sampleRate: sampleRate
+            ))
+            return audio
+        } catch {
+            await emit(.ttsGenerationError(
+                model: modelName,
+                phase: "generate",
+                error: String(describing: error)
+            ))
+            throw error
         }
-        #endif
-        return try await _generateImpl(
-            text: text, voice: voice, refAudio: refAudio, refText: refText,
-            language: language, instruct: instruct,
-            generationParameters: generationParameters
-        )
     }
 
     private func _generateImpl(
@@ -544,6 +600,9 @@ public final class Qwen3TTSModel: Module, SpeechGenerationModel, @unchecked Send
         let (stream, continuation) = AsyncThrowingStream<AudioGeneration, Error>.makeStream()
         Task { @Sendable [weak self] in
             guard let self else { return }
+            let modelName = "Qwen3TTS"
+            let generateStart = Date()
+            await emit(.ttsGenerationStart(model: modelName, textLength: text.count, voiceType: voice))
             do {
                 guard speechTokenizer != nil else {
                     throw AudioGenerationError.modelNotInitialized("Speech tokenizer not loaded")
@@ -561,6 +620,15 @@ public final class Qwen3TTSModel: Module, SpeechGenerationModel, @unchecked Send
                 let path = try resolveGenerationPath(refAudio: refAudio, refText: refText)
                 let audio: MLXArray
 
+                // Track token count for progress emission. Each onToken callback
+                // increments this counter synchronously inside generateFromEmbeddings.
+                // Progress events are emitted OUTSIDE the decode loop — after
+                // generateFromEmbeddings returns — at coarse fraction-complete
+                // checkpoints, satisfying REQUIREMENTS §7 anti-pattern "no emission
+                // inside per-step decode loops".
+                var tokenCount = 0
+                var lastProgressBucket = -1
+
                 switch path {
                 case .voiceDesign:
                     audio = generateVoiceDesign(
@@ -572,6 +640,7 @@ public final class Qwen3TTSModel: Module, SpeechGenerationModel, @unchecked Send
                         repetitionPenalty: repPenalty,
                         maxTokens: maxTokens,
                         onToken: { tokenId in
+                            tokenCount += 1
                             continuation.yield(.token(tokenId))
                         },
                         onInfo: { info in
@@ -590,6 +659,7 @@ public final class Qwen3TTSModel: Module, SpeechGenerationModel, @unchecked Send
                         repetitionPenalty: repPenalty,
                         maxTokens: maxTokens,
                         onToken: { tokenId in
+                            tokenCount += 1
                             continuation.yield(.token(tokenId))
                         },
                         onInfo: { info in
@@ -609,6 +679,7 @@ public final class Qwen3TTSModel: Module, SpeechGenerationModel, @unchecked Send
                         repetitionPenalty: repPenalty,
                         maxTokens: maxTokens
                     )
+                    tokenCount = 0  // ICL uses non-streaming path; no per-token count
 
                 case .base:
                     audio = try generateBase(
@@ -621,6 +692,7 @@ public final class Qwen3TTSModel: Module, SpeechGenerationModel, @unchecked Send
                         repetitionPenalty: repPenalty,
                         maxTokens: maxTokens,
                         onToken: { tokenId in
+                            tokenCount += 1
                             continuation.yield(.token(tokenId))
                         },
                         onInfo: { info in
@@ -629,9 +701,43 @@ public final class Qwen3TTSModel: Module, SpeechGenerationModel, @unchecked Send
                     )
                 }
 
+                // Emit ttsGenerationProgress at fraction-complete checkpoints.
+                // This is the ONLY location where progress events fire — outside every
+                // for/while loop body (REQUIREMENTS §7 anti-pattern compliance).
+                // We use 10% buckets: bucket = tokensGenerated * 10 / maxTokens.
+                // After the generate call we have the final count; emit any bucket
+                // transitions that were skipped (coarse checkpoint: final fraction).
+                let finalBucket = tokenCount > 0 ? min(10, tokenCount * 10 / maxTokens) : 10
+                if finalBucket > lastProgressBucket {
+                    lastProgressBucket = finalBucket
+                    let fractionComplete = tokenCount > 0
+                        ? min(1.0, Double(tokenCount) / Double(max(maxTokens, 1)))
+                        : 1.0
+                    let estimatedSamples = Int(fractionComplete * Double(sampleRate) * Double(text.count) / 10.0)
+                    await emit(.ttsGenerationProgress(
+                        model: modelName,
+                        fractionComplete: fractionComplete,
+                        generatedSamples: max(0, estimatedSamples)
+                    ))
+                }
+
+                let durationSeconds = Date().timeIntervalSince(generateStart)
+                let audioSamples = audio.dim(0)
+                await emit(.ttsGenerationComplete(
+                    model: modelName,
+                    durationSeconds: durationSeconds,
+                    audioSamples: audioSamples,
+                    sampleRate: sampleRate
+                ))
+
                 continuation.yield(.audio(audio))
                 continuation.finish()
             } catch {
+                await emit(.ttsGenerationError(
+                    model: modelName,
+                    phase: "generateStream",
+                    error: String(describing: error)
+                ))
                 continuation.finish(throwing: error)
             }
         }
