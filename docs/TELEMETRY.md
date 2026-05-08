@@ -34,7 +34,7 @@ sink without any dependency on Apple's `os.Logger` or any third-party framework.
    - [Writing a MockMLXAudioTelemetryReporter for tests](#writing-a-mockmlxaudiotelemetryreporter-for-tests)
    - [Adding a new event case](#adding-a-new-event-case)
 8. [Host Adapter](#host-adapter)
-9. [Invariant Verification Greps](#invariant-verification-greps)
+9. [Invariant Grep Checks](#invariant-grep-checks)
 
 ---
 
@@ -268,7 +268,7 @@ if let telemetry {
 ## Invariants
 
 These must hold at every emission site and can be verified by the grep commands
-in [Invariant Verification Greps](#invariant-verification-greps).
+in [Invariant Grep Checks](#invariant-grep-checks).
 
 1. **Library never imports Produciesta or any host.** The telemetry seam is one-way:
    the library emits; the host receives. No host symbol ever appears in `Sources/`.
@@ -420,32 +420,45 @@ For implementation guidance, see the pattern doc at
 
 ---
 
-## Invariant Verification Greps
+## Invariant Grep Checks
 
-Sortie 19 (integration verification) runs these commands as part of its exit criteria.
-Run them locally after any change to the telemetry surface to verify no invariant has
-been violated.
+Sortie 19's `HotLoopGuardTests` (in
+`Tests/MLXAudioTests/Telemetry/HotLoopGuardTests.swift`) runs these commands at
+test time so the invariants are enforced on every CI run, not just at sortie
+exit. Run them locally after any change to the telemetry surface to verify no
+invariant has been violated.
 
 ```sh
 # Invariant 1: library never imports the host
+# Expected output: empty (zero matches)
 grep -RIn "import .*Produciesta" Sources/
 
 # Invariant 2: no new dependencies in the two public telemetry files
+# Expected output: empty (zero matches)
 grep -RIn "import swift_log\|import Logging\|import OSLog" \
   Sources/MLXAudioCore/Telemetry/MLXAudioTelemetryEvent.swift \
   Sources/MLXAudioCore/Telemetry/MLXAudioTelemetryReporter.swift
 
 # Invariant 6: autoclosure present in the canonical helper
+# Expected output: a count >= 1
 grep -c "@autoclosure" \
   Sources/MLXAudioCore/Telemetry/MLXAudioTelemetryReporter.swift
 
-# Hot-loop guard: no await emit(...) inside for/while bodies in TTS/STT
-grep -A2 -E '(for |while )' \
-  Sources/MLXAudioTTS/**/*.swift \
-  Sources/MLXAudioSTT/**/*.swift \
-  | grep 'await emit('
+# Hot-loop guard: no `await emit(` within 2 lines of a `for `/`while ` keyword
+# in any TTS / STT / codec source file (after stripping `//` line comments to
+# eliminate the routine false positives that occur when the words "for" or
+# "while" appear in English doc-comment prose).
 # Expected output: empty (zero matches)
+find Sources/MLXAudioTTS Sources/MLXAudioSTT Sources/MLXAudioCodecs \
+     -name '*.swift' -print0 \
+  | xargs -0 sed 's,//.*$,,' \
+  | grep -nE '(for |while )' -A 2 \
+  | grep 'await emit('
 ```
+
+The `HotLoopGuardTests` suite runs the same commands via `Process` and fails
+the build on any non-empty output. This makes the invariants self-enforcing on
+every PR.
 
 ---
 

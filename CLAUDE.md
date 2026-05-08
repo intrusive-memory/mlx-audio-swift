@@ -57,6 +57,25 @@ Read and follow all instructions in [AGENTS.md](AGENTS.md) before starting any t
     -only-testing:MLXAudioTests/AudioUtilsTests \
     -only-testing:MLXAudioTests/AudioIORoundTripTests \
     -only-testing:MLXAudioTests/TelemetryLeakDetectionPatternTests \
+    -only-testing:MLXAudioTests/MLXAudioTelemetryEventTests \
+    -only-testing:MLXAudioTests/AudioModelManagerTelemetryTests \
+    -only-testing:MLXAudioTests/Qwen3TTSTelemetryTests \
+    -only-testing:MLXAudioTests/GLMASRTelemetryTests \
+    -only-testing:MLXAudioTests/MemoryTelemetryTests \
+    -only-testing:MLXAudioTests/VocosTelemetryTests \
+    -only-testing:MLXAudioTests/AudioUtilsTelemetryTests \
+    -only-testing:MLXAudioTests/SopranoTTSTelemetryTests \
+    -only-testing:MLXAudioTests/LlamaTTSTelemetryTests \
+    -only-testing:MLXAudioTests/PocketTTSTelemetryTests \
+    -only-testing:MLXAudioTests/MarvisTTSTelemetryTests \
+    -only-testing:MLXAudioTests/Qwen3ASRTelemetryTests \
+    -only-testing:MLXAudioTests/EncodecTelemetryTests \
+    -only-testing:MLXAudioTests/SNACTelemetryTests \
+    -only-testing:MLXAudioTests/MimiTelemetryTests \
+    -only-testing:MLXAudioTests/DACVAETelemetryTests \
+    -only-testing:MLXAudioTests/AudioBufferCacheTelemetryTests \
+    -only-testing:MLXAudioTests/EndToEndTelemetryTests \
+    -only-testing:MLXAudioTests/HotLoopGuardTests \
     CODE_SIGNING_ALLOWED=NO
   ```
 
