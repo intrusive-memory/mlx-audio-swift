@@ -218,6 +218,24 @@ public class DACVAEFullDecoder: Module {
 /// This is a VAE-style audio codec that encodes audio to a latent space
 /// and decodes it back. Unlike the standard DAC, this uses continuous
 /// latent representations instead of discrete codes.
+///
+/// ## Telemetry
+///
+/// Attach a reporter via ``setTelemetry(_:)`` to receive
+/// ``MLXAudioTelemetryEvent/codecEncodeStart(codec:inputSamples:)`` /
+/// ``MLXAudioTelemetryEvent/codecEncodeComplete(codec:durationSeconds:compressionRatio:)`` and
+/// ``MLXAudioTelemetryEvent/codecDecodeStart(codec:codedFrames:)`` /
+/// ``MLXAudioTelemetryEvent/codecDecodeComplete(codec:durationSeconds:outputSamples:)``
+/// (and ``MLXAudioTelemetryEvent/codecError(codec:operation:error:)`` on failure)
+/// at the public encode/decode boundaries.
+///
+/// Use the async overloads ``encode(_:)`` (async) and
+/// ``decode(_:chunkSize:)`` (async) to get telemetry emission;
+/// the synchronous overloads are retained for backward-compatible callers.
+///
+/// The internal watermarker submodule is not instrumented — no events
+/// are emitted from inside the watermark path or from any per-frame
+/// decode loop.
 public class DACVAE: Module {
     public let config: DACVAEConfig
     public let sampleRate: Int
@@ -227,6 +245,32 @@ public class DACVAE: Module {
     @ModuleInfo(key: "quantizer_in_proj") var quantizerInProj: DACVAEQuantizerInProj
     @ModuleInfo(key: "quantizer_out_proj") var quantizerOutProj: DACVAEQuantizerOutProj
     @ModuleInfo(key: "decoder") var decoder: DACVAEFullDecoder
+
+    // MARK: - Telemetry
+
+    /// Optional vendor-neutral telemetry reporter. `nil` by default — zero
+    /// overhead when no reporter is attached.
+    private var telemetry: (any MLXAudioTelemetryReporter)?
+
+    /// Attach or detach a telemetry reporter.
+    ///
+    /// Set to `nil` (the default) to disable telemetry entirely. Setting a
+    /// reporter enables ``MLXAudioTelemetryEvent`` emission at every public
+    /// encode/decode boundary.
+    public func setTelemetry(_ reporter: (any MLXAudioTelemetryReporter)?) {
+        self.telemetry = reporter
+    }
+
+    /// Canonical per-instance emit helper (copied verbatim from
+    /// `MLXAudioTelemetryReporter.swift` doc comment).
+    ///
+    /// The `@autoclosure` is load-bearing: when `telemetry` is `nil` the
+    /// closure is never evaluated, so payload-construction work (shape
+    /// reads, multiplications) is completely elided.
+    private func emit(_ event: @autoclosure () -> MLXAudioTelemetryEvent) async {
+        guard let telemetry else { return }
+        await telemetry.capture(event())
+    }
 
     public init(config: DACVAEConfig) {
         self.config = config
@@ -276,7 +320,11 @@ public class DACVAE: Module {
         return wavs
     }
 
-    /// Encode waveform to latent representation.
+    /// Encode waveform to latent representation (synchronous overload).
+    ///
+    /// This overload is retained for backward compatibility with existing
+    /// synchronous callers. No public-surface telemetry is emitted from
+    /// this path — use the `async` overload if you need telemetry.
     ///
     /// - Parameter waveform: Audio tensor of shape (batch, length, 1)
     /// - Returns: Latent features of shape (batch, channels, frames)
@@ -294,6 +342,63 @@ public class DACVAE: Module {
             }
         }
         #endif
+        return _dacEncodeImpl(waveform)
+    }
+
+    /// Encode waveform to latent representation with telemetry emission.
+    ///
+    /// Emits ``MLXAudioTelemetryEvent/codecEncodeStart(codec:inputSamples:)``
+    /// before encoding, then
+    /// ``MLXAudioTelemetryEvent/codecEncodeComplete(codec:durationSeconds:compressionRatio:)``
+    /// on success.
+    ///
+    /// `inputSamples` is the sequence-length dimension of the input waveform
+    /// (dimension 1 of a `[batch, length, 1]` tensor).
+    /// `compressionRatio = inputBytes / outputBytes` where
+    /// `inputBytes = shape[1] × 4` (Float32 input samples) and
+    /// `outputBytes = total output elements × 4` (Float32 latent features).
+    /// If either byte count is zero the complete event is replaced by ``codecError``.
+    ///
+    /// Telemetry emission is a boundary-level operation — no events are emitted
+    /// inside the encoder or the watermarker path.
+    ///
+    /// - Parameter waveform: Audio tensor of shape (batch, length, 1)
+    /// - Returns: Latent features of shape (batch, channels, frames)
+    public func encode(_ waveform: MLXArray) async -> MLXArray {
+        // inputSamples: sequence-length dimension (index 1 of [batch, length, 1]).
+        let inputSamples: Int = waveform.ndim >= 2 ? waveform.shape[1] : waveform.shape[0]
+
+        await emit(.codecEncodeStart(codec: "dacvae", inputSamples: inputSamples))
+
+        let start = Date()
+        let result = _dacEncodeImpl(waveform)
+        let elapsed = Date().timeIntervalSince(start)
+
+        // inputBytes: sequence-length × 4 (Float32)
+        let inputBytes = inputSamples * 4
+        // outputBytes: total latent elements × 4 (Float32)
+        let outputElements = result.shape.reduce(1, *)
+        let outputBytes = outputElements * 4
+
+        if inputBytes > 0 && outputBytes > 0 {
+            let compressionRatio = Double(inputBytes) / Double(outputBytes)
+            await emit(.codecEncodeComplete(
+                codec: "dacvae",
+                durationSeconds: elapsed,
+                compressionRatio: compressionRatio
+            ))
+        } else {
+            await emit(.codecError(
+                codec: "dacvae",
+                operation: "encode",
+                error: "compressionRatio unavailable: inputBytes=\(inputBytes) outputBytes=\(outputBytes)"
+            ))
+        }
+
+        return result
+    }
+
+    private func _dacEncodeImpl(_ waveform: MLXArray) -> MLXArray {
         let wav = pad(waveform)
         let z = encoder(wav)
 
@@ -306,7 +411,11 @@ public class DACVAE: Module {
         return mean.transposed(0, 2, 1)
     }
 
-    /// Decode latent features back to waveform.
+    /// Decode latent features back to waveform (synchronous overload).
+    ///
+    /// This overload is retained for backward compatibility with existing
+    /// synchronous callers. No public-surface telemetry is emitted from
+    /// this path — use the `async` overload if you need telemetry.
     ///
     /// For SAM-Audio, this accepts features in codebook_dim space (128)
     /// and projects them to latent_dim before decoding.
@@ -325,6 +434,53 @@ public class DACVAE: Module {
         }
         #endif
         return _dacDecodeImpl(encodedFrames, chunkSize: chunkSize)
+    }
+
+    /// Decode latent features back to waveform with telemetry emission.
+    ///
+    /// Emits ``MLXAudioTelemetryEvent/codecDecodeStart(codec:codedFrames:)``
+    /// before decoding, then
+    /// ``MLXAudioTelemetryEvent/codecDecodeComplete(codec:durationSeconds:outputSamples:)``
+    /// on success.
+    ///
+    /// `codedFrames` is the number of frames in the input encoded tensor
+    /// (dimension 2 of a `[batch, codebook_dim, frames]` shape when ndim ≥ 3,
+    /// falling back to the last dimension otherwise).
+    /// `outputSamples` is the sequence-length of the decoded waveform (dimension 1
+    /// of a `[batch, length, 1]` output).
+    ///
+    /// Telemetry emission is a boundary-level operation — no events are emitted
+    /// inside the per-chunk decode loop or inside the watermarker path.
+    ///
+    /// - Parameters:
+    ///   - encodedFrames: Tensor of shape (batch, codebook_dim, frames)
+    ///   - chunkSize: If provided, decode in chunks of this many frames
+    /// - Returns: Waveform of shape (batch, length, 1)
+    public func decode(_ encodedFrames: MLXArray, chunkSize: Int? = nil) async -> MLXArray {
+        // codedFrames: last dimension of [batch, codebook_dim, frames].
+        let codedFrames: Int = {
+            if encodedFrames.ndim >= 3 {
+                return encodedFrames.shape[2]
+            }
+            return encodedFrames.shape[encodedFrames.ndim - 1]
+        }()
+
+        await emit(.codecDecodeStart(codec: "dacvae", codedFrames: codedFrames))
+
+        let start = Date()
+        let audioValues = _dacDecodeImpl(encodedFrames, chunkSize: chunkSize)
+        let elapsed = Date().timeIntervalSince(start)
+
+        // outputSamples: sequence-length dimension (index 1 of [batch, length, 1]).
+        let outputSamples: Int = audioValues.ndim >= 2 ? audioValues.shape[1] : audioValues.shape[0]
+
+        await emit(.codecDecodeComplete(
+            codec: "dacvae",
+            durationSeconds: elapsed,
+            outputSamples: outputSamples
+        ))
+
+        return audioValues
     }
 
     private func _dacDecodeImpl(_ encodedFrames: MLXArray, chunkSize: Int?) -> MLXArray {
