@@ -7,6 +7,21 @@ import MLXNN
 
 // MARK: - SNAC Model
 
+/// Scalable Neural Audio Codec (SNAC).
+///
+/// ## Telemetry
+///
+/// Attach a reporter via ``setTelemetry(_:)`` to receive
+/// ``MLXAudioTelemetryEvent/codecEncodeStart(codec:inputSamples:)`` /
+/// ``MLXAudioTelemetryEvent/codecEncodeComplete(codec:durationSeconds:compressionRatio:)`` and
+/// ``MLXAudioTelemetryEvent/codecDecodeStart(codec:codedFrames:)`` /
+/// ``MLXAudioTelemetryEvent/codecDecodeComplete(codec:durationSeconds:outputSamples:)``
+/// (and ``MLXAudioTelemetryEvent/codecError(codec:operation:error:)`` on failure)
+/// at the public encode/decode boundaries.
+///
+/// Use the async overloads ``encode(_:)`` (async) and ``decode(_:)`` (async)
+/// to get telemetry emission; the synchronous overloads are retained for
+/// backward-compatible callers.
 public class SNAC: Module {
     public let samplingRate: Int
     public let encoderDim: Int
@@ -88,6 +103,32 @@ public class SNAC: Module {
         Telemetry.trackLifecycleEnd(className: "SNAC.Model")
     }
 
+    // MARK: - Telemetry
+
+    /// Optional vendor-neutral telemetry reporter. `nil` by default — zero
+    /// overhead when no reporter is attached.
+    private var telemetry: (any MLXAudioTelemetryReporter)?
+
+    /// Attach or detach a telemetry reporter.
+    ///
+    /// Set to `nil` (the default) to disable telemetry entirely. Setting a
+    /// reporter enables ``MLXAudioTelemetryEvent`` emission at every public
+    /// encode/decode boundary.
+    public func setTelemetry(_ reporter: (any MLXAudioTelemetryReporter)?) {
+        self.telemetry = reporter
+    }
+
+    /// Canonical per-instance emit helper (copied verbatim from
+    /// `MLXAudioTelemetryReporter.swift` doc comment).
+    ///
+    /// The `@autoclosure` is load-bearing: when `telemetry` is `nil` the
+    /// closure is never evaluated, so payload-construction work (shape
+    /// reads, multiplications) is completely elided.
+    private func emit(_ event: @autoclosure () -> MLXAudioTelemetryEvent) async {
+        guard let telemetry else { return }
+        await telemetry.capture(event())
+    }
+
     public func preprocess(_ audioData: MLXArray) -> MLXArray {
         let length = audioData.shape[audioData.ndim - 1]
 
@@ -122,35 +163,146 @@ public class SNAC: Module {
         return (trimmed, codes)
     }
 
+    /// Encodes the input audio waveform into discrete codes (synchronous overload).
+    ///
+    /// This overload is retained for backward compatibility with existing
+    /// synchronous callers. No public-surface telemetry is emitted from
+    /// this path — use the `async` overload if you need telemetry.
+    ///
+    /// - Parameter audioData: The input audio waveform with shape (batch, channels, time) in NCT format.
+    /// - Returns: An array of code tensors, one per RVQ codebook.
     public func encode(_ audioData: MLXArray) -> [MLXArray] {
         // S11: SNAC.encode interval (Level 2 = .operations).
         #if MLXAUDIO_TELEMETRY_FULL
         if Telemetry.level >= .operations {
             return Telemetry.emitInterval(name: "SNAC.encode", family: .codecs) {
-                let preprocessed = self.preprocess(audioData)
-                let z = self.encoder(preprocessed)
-                let (_, codes) = self.quantizer(z)
-                return codes
+                self._snacEncodeImpl(audioData)
             }
         }
         #endif
+        return _snacEncodeImpl(audioData)
+    }
+
+    /// Encodes the input audio waveform into discrete codes with telemetry emission.
+    ///
+    /// Emits ``MLXAudioTelemetryEvent/codecEncodeStart(codec:inputSamples:)``
+    /// before encoding, then
+    /// ``MLXAudioTelemetryEvent/codecEncodeComplete(codec:durationSeconds:compressionRatio:)``
+    /// on success.
+    ///
+    /// `inputSamples` is the last dimension of `audioData` (the time/samples
+    /// dimension in NCT format: `[batch, channels, time]`).
+    /// `compressionRatio` = `Double(inputBytes) / Double(outputBytes)` where
+    /// `inputBytes = time × channels × 4` (Float32 input) and
+    /// `outputBytes = total code elements across all codebooks × 4` (Int32 indices).
+    /// If either byte count is zero the complete event is replaced by ``codecError``.
+    ///
+    /// Telemetry emission is a boundary-level operation — no events are emitted
+    /// inside the per-codebook quantization loops.
+    ///
+    /// - Parameter audioData: The input audio waveform with shape (batch, channels, time) in NCT format.
+    /// - Returns: An array of code tensors, one per RVQ codebook.
+    public func encode(_ audioData: MLXArray) async -> [MLXArray] {
+        // inputSamples: last dimension (time) of NCT-format [batch, channels, time].
+        let inputSamples: Int = audioData.shape[audioData.ndim - 1]
+
+        await emit(.codecEncodeStart(codec: "snac", inputSamples: inputSamples))
+
+        let start = Date()
+        let codes = _snacEncodeImpl(audioData)
+        let elapsed = Date().timeIntervalSince(start)
+
+        // inputBytes: time × channels × 4 (Float32). channels is dim ndim-2 in NCT.
+        let channels = audioData.ndim >= 2 ? audioData.shape[audioData.ndim - 2] : 1
+        let inputBytes = inputSamples * channels * 4
+        // outputBytes: total code elements across all codebooks × 4 (Int32 indices).
+        let outputElements = codes.reduce(0) { $0 + $1.shape.reduce(1, *) }
+        let outputBytes = outputElements * 4
+
+        if inputBytes > 0 && outputBytes > 0 {
+            let compressionRatio = Double(inputBytes) / Double(outputBytes)
+            await emit(.codecEncodeComplete(
+                codec: "snac",
+                durationSeconds: elapsed,
+                compressionRatio: compressionRatio
+            ))
+        } else {
+            await emit(.codecError(
+                codec: "snac",
+                operation: "encode",
+                error: "compressionRatio unavailable: inputBytes=\(inputBytes) outputBytes=\(outputBytes)"
+            ))
+        }
+
+        return codes
+    }
+
+    private func _snacEncodeImpl(_ audioData: MLXArray) -> [MLXArray] {
         let preprocessed = preprocess(audioData)
         let z = encoder(preprocessed)
         let (_, codes) = quantizer(z)
         return codes
     }
 
+    /// Decodes the given codes into an output audio waveform (synchronous overload).
+    ///
+    /// This overload is retained for backward compatibility with existing
+    /// synchronous callers. No public-surface telemetry is emitted from
+    /// this path — use the `async` overload if you need telemetry.
+    ///
+    /// - Parameter codes: An array of code tensors, one per RVQ codebook.
+    /// - Returns: The decoded audio waveform.
     public func decode(_ codes: [MLXArray]) -> MLXArray {
         // S11: SNAC.decode interval (Level 2 = .operations).
         #if MLXAUDIO_TELEMETRY_FULL
         if Telemetry.level >= .operations {
             return Telemetry.emitInterval(name: "SNAC.decode", family: .codecs) {
-                let zQ = self.quantizer.fromCodes(codes)
-                let audioHat = self.decoder(zQ)
-                return audioHat
+                self._snacDecodeImpl(codes)
             }
         }
         #endif
+        return _snacDecodeImpl(codes)
+    }
+
+    /// Decodes the given codes into an output audio waveform with telemetry emission.
+    ///
+    /// Emits ``MLXAudioTelemetryEvent/codecDecodeStart(codec:codedFrames:)``
+    /// before decoding, then
+    /// ``MLXAudioTelemetryEvent/codecDecodeComplete(codec:durationSeconds:outputSamples:)``
+    /// on success.
+    ///
+    /// `codedFrames` is the total number of code elements across all codebooks
+    /// (sum of each codebook tensor's element count). `outputSamples` is the
+    /// last dimension (time) of the decoded audio waveform in NCT format.
+    ///
+    /// Telemetry emission is a boundary-level operation — no events are emitted
+    /// inside the per-codebook decode loop or VQ codebook lookups.
+    ///
+    /// - Parameter codes: An array of code tensors, one per RVQ codebook.
+    /// - Returns: The decoded audio waveform.
+    public func decode(_ codes: [MLXArray]) async -> MLXArray {
+        // codedFrames: total code elements across all codebooks.
+        let codedFrames = codes.reduce(0) { $0 + $1.shape.reduce(1, *) }
+
+        await emit(.codecDecodeStart(codec: "snac", codedFrames: codedFrames))
+
+        let start = Date()
+        let audioHat = _snacDecodeImpl(codes)
+        let elapsed = Date().timeIntervalSince(start)
+
+        // outputSamples: last dimension (time) of the decoded audio in NCT format.
+        let outputSamples: Int = audioHat.shape[audioHat.ndim - 1]
+
+        await emit(.codecDecodeComplete(
+            codec: "snac",
+            durationSeconds: elapsed,
+            outputSamples: outputSamples
+        ))
+
+        return audioHat
+    }
+
+    private func _snacDecodeImpl(_ codes: [MLXArray]) -> MLXArray {
         let zQ = quantizer.fromCodes(codes)
         let audioHat = decoder(zQ)
         return audioHat
