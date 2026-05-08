@@ -298,6 +298,33 @@ public class GLMASRModel: Module {
 
     public var tokenizer: Tokenizers.Tokenizer?
 
+    // MARK: - Vendor-neutral telemetry (Sortie 4 — OPERATION SILENT STETHOSCOPE)
+
+    /// Optional telemetry reporter. Defaults to `nil` — zero runtime cost
+    /// when no host has attached a reporter. Set via ``setTelemetry(_:)``.
+    private var telemetry: (any MLXAudioTelemetryReporter)?
+
+    /// Attach (or detach) a telemetry reporter.
+    ///
+    /// Call after construction; does not affect the model's weights or
+    /// inference behaviour. Passing `nil` silences all emission (default).
+    public func setTelemetry(_ reporter: (any MLXAudioTelemetryReporter)?) {
+        telemetry = reporter
+    }
+
+    /// Canonical per-instance emit helper (copied verbatim per Resolved
+    /// Design Decisions in EXECUTION_PLAN.md).
+    ///
+    /// The `@autoclosure` is load-bearing: payload construction (e.g.
+    /// `String(describing:)` formatting, array-count reads) is deferred
+    /// and skipped entirely when `telemetry` is `nil`.
+    private func emit(_ event: @autoclosure () -> MLXAudioTelemetryEvent) async {
+        guard let telemetry else { return }
+        await telemetry.capture(event())
+    }
+
+    // MARK: - Init
+
     public init(config: GLMASRModelConfig) {
         self.config = config
         self.vocabSize = config.lmConfig.vocabSize
@@ -378,10 +405,24 @@ public class GLMASRModel: Module {
         topK: Int = 0,
         verbose: Bool = false
     ) -> STTOutput {
+        // Emit sttTranscriptionStart — fire-and-forget because generate() is synchronous.
+        let audioSampleCount = audio.size
+        if telemetry != nil {
+            Task { [weak self] in
+                await self?.emit(.sttTranscriptionStart(
+                    model: "glm-asr",
+                    audioSamples: audioSampleCount,
+                    sampleRate: AudioConstants.sampleRate
+                ))
+            }
+        }
+
+        let startTime = Date()
+
         // S11: GLMASR.generate interval (Level 2 = .operations).
         #if MLXAUDIO_TELEMETRY_FULL
         if Telemetry.level >= .operations {
-            return Telemetry.emitInterval(
+            let result = Telemetry.emitInterval(
                 name: "GLMASR.generate",
                 family: .glmASR,
                 message: ""
@@ -391,12 +432,39 @@ public class GLMASRModel: Module {
                     topP: topP, topK: topK, verbose: verbose
                 )
             }
+            let elapsed = Date().timeIntervalSince(startTime)
+            let textLen = result.text.count
+            if telemetry != nil {
+                Task { [weak self] in
+                    await self?.emit(.sttTranscriptionComplete(
+                        model: "glm-asr",
+                        durationSeconds: elapsed,
+                        textLength: textLen
+                    ))
+                }
+            }
+            return result
         }
         #endif
-        return _glmGenerateImpl(
+
+        let result = _glmGenerateImpl(
             audio: audio, maxTokens: maxTokens, temperature: temperature,
             topP: topP, topK: topK, verbose: verbose
         )
+
+        let elapsed = Date().timeIntervalSince(startTime)
+        let textLen = result.text.count
+        if telemetry != nil {
+            Task { [weak self] in
+                await self?.emit(.sttTranscriptionComplete(
+                    model: "glm-asr",
+                    durationSeconds: elapsed,
+                    textLength: textLen
+                ))
+            }
+        }
+
+        return result
     }
 
     private func _glmGenerateImpl(
@@ -476,21 +544,50 @@ public class GLMASRModel: Module {
         temperature: Float = 0.0,
         topP: Float = 0.95
     ) -> AsyncThrowingStream<STTGeneration, Error> {
-        AsyncThrowingStream { continuation in
+        // Capture audio metadata before entering the stream closure so
+        // the telemetry payload is available without referencing `audio`
+        // from the captured context after the call returns.
+        let audioSampleCount = audio.size
+        let streamStartTime = Date()
+
+        // Emit sttTranscriptionStart — fire-and-forget from synchronous context.
+        if telemetry != nil {
+            Task { [weak self] in
+                await self?.emit(.sttTranscriptionStart(
+                    model: "glm-asr",
+                    audioSamples: audioSampleCount,
+                    sampleRate: AudioConstants.sampleRate
+                ))
+            }
+        }
+
+        return AsyncThrowingStream { [weak self] continuation in
+            // Track the current pipeline phase so the catch block can
+            // emit an accurate phase: string. Phases match the actual
+            // code paths in this method (not abstract stage names).
+            var currentPhase = "tokenizer"
+
             do {
-                guard let tokenizer = self.tokenizer else {
+                guard let tokenizer = self?.tokenizer else {
                     throw STTError.modelNotInitialized("Tokenizer not loaded")
                 }
-                
+
+                currentPhase = "feature_extraction"
+
                 let startTime = Date()
-                
-                // Prepare for generation
-                let (context, promptTokenCount) = self.prepareGeneration(audio: audio, tokenizer: tokenizer)
+
+                // Prepare for generation (mel preprocessing + audio encoding)
+                guard let strongSelf = self else {
+                    throw STTError.modelNotInitialized("Model deallocated before generation")
+                }
+                let (context, promptTokenCount) = strongSelf.prepareGeneration(audio: audio, tokenizer: tokenizer)
                 var ctx = context
-                
+
                 let prefillEndTime = Date()
                 let prefillTime = prefillEndTime.timeIntervalSince(startTime)
-                
+
+                currentPhase = "decode"
+
                 let generateStartTime = Date()
                 var generatedTokens: [Int] = []
                 var glmStreamTokenStep = 0
@@ -518,15 +615,15 @@ public class GLMASRModel: Module {
                     glmStreamTokenStep += 1
 
                     // Step to next token
-                    ctx = self.stepGeneration(context: ctx, nextToken: nextToken)
+                    ctx = strongSelf.stepGeneration(context: ctx, nextToken: nextToken)
                 }
-                
+
                 let endTime = Date()
                 let generateTime = endTime.timeIntervalSince(generateStartTime)
                 let totalTime = endTime.timeIntervalSince(startTime)
-                
+
                 Memory.clearCache()
-                
+
                 // Emit generation info
                 let tokensPerSecond = generateTime > 0 ? Double(generatedTokens.count) / generateTime : 0
                 let peakMemory = Double(Memory.peakMemory) / 1e9
@@ -539,7 +636,7 @@ public class GLMASRModel: Module {
                     peakMemoryUsage: peakMemory
                 )
                 continuation.yield(.info(info))
-                
+
                 // Emit final result
                 let text = ctx.decode(generatedTokens)
                 let output = STTOutput(
@@ -553,9 +650,31 @@ public class GLMASRModel: Module {
                     peakMemoryUsage: peakMemory
                 )
                 continuation.yield(.result(output))
-                
+
+                // Emit sttTranscriptionComplete — fire-and-forget.
+                let elapsed = Date().timeIntervalSince(streamStartTime)
+                let textLen = text.count
+                Task { [weak self] in
+                    await self?.emit(.sttTranscriptionComplete(
+                        model: "glm-asr",
+                        durationSeconds: elapsed,
+                        textLength: textLen
+                    ))
+                }
+
                 continuation.finish()
             } catch {
+                // Emit sttTranscriptionError with the phase where the error
+                // was thrown. The error is re-thrown to the stream consumer.
+                let errorString = String(describing: error)
+                let phase = currentPhase
+                Task { [weak self] in
+                    await self?.emit(.sttTranscriptionError(
+                        model: "glm-asr",
+                        phase: phase,
+                        error: errorString
+                    ))
+                }
                 continuation.finish(throwing: error)
             }
         }
