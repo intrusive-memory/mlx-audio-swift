@@ -685,6 +685,17 @@ private actor _AudioModelManagerTelemetryStorage {
   }
 }
 
+// MARK: - Metal sampler (Sortie 5 — OPERATION SILENT STETHOSCOPE)
+//
+// Process-wide `MetalMemorySampler` instance. The sampler is a Swift
+// `actor` so its `lastSampledMB` baseline is safe to share across
+// every load path in this file. We do NOT modify Sortie 2's
+// `setTelemetry` / `emit` / storage — the sampler reads the same
+// reporter that Sortie 2's storage actor already holds, and is invoked
+// alongside (not inside) the existing `modelLoadComplete` emit at the
+// same coarse-grained boundary.
+private let _audioModelManagerMetalSampler = MetalMemorySampler()
+
 // MARK: - AudioModelManager
 
 /// Manager for audio model lifecycle and Acervo component integration.
@@ -770,6 +781,35 @@ public enum AudioModelManager {
   private static func sizeMB(for descriptor: ComponentDescriptor?) -> Double {
     guard let descriptor else { return 0.0 }
     return Double(descriptor.estimatedSizeBytes) / (1024.0 * 1024.0)
+  }
+
+  /// Sortie 5: forward the current Metal allocation reading to the
+  /// shared `MetalMemorySampler`, which decides whether to emit a
+  /// `metalBufferAllocated` / `metalBufferDeallocated` event based on
+  /// the 10 MB delta-threshold (REQUIREMENTS §2.6).
+  ///
+  /// Called alongside (not inside) the existing `modelLoadComplete`
+  /// emit at every load boundary in this file. Sampling is gated on
+  /// the same reporter Sortie 2's storage actor holds — when no
+  /// reporter is attached this helper short-circuits before the
+  /// `MTLDevice.currentAllocatedSize` read, so the silent-default
+  /// invariant (REQUIREMENTS §6 invariant 3) is preserved. This
+  /// mirrors the `@autoclosure` pattern used by `emit(_:)` above —
+  /// the Metal sampling cost is only paid when there is somewhere
+  /// for the resulting event to go.
+  ///
+  /// Sortie 2's audit invariant — "every `MTLDevice` reference lives
+  /// inside an `await emit(...)` body" — is preserved by routing the
+  /// MTLDevice read through `sampleMetalAllocatedMB()`, the same
+  /// helper Sortie 2 already concentrates the device read into; and
+  /// by gating its invocation on a non-`nil` reporter immediately
+  /// before the call, just as the canonical `emit(_:)` does.
+  private static func sampleMetalForLoadBoundary() async {
+    guard let reporter = await _AudioModelManagerTelemetryStorage.shared.current() else { return }
+    await _audioModelManagerMetalSampler.sample(
+      currentMB: sampleMetalAllocatedMB(),
+      reporter: reporter
+    )
   }
 
   /// Trigger lazy registration of all P1 and P2 audio components.
@@ -952,6 +992,10 @@ public enum AudioModelManager {
         metalAllocatedMB: sampleMetalAllocatedMB()
       )
     )
+    // Sortie 5: forward the post-load Metal reading to the shared
+    // sampler so a `metalBufferAllocated` event is emitted when the
+    // delta vs. the previous load boundary exceeds 10 MB.
+    await sampleMetalForLoadBoundary()
     return result
   }
 
@@ -1080,6 +1124,10 @@ public enum AudioModelManager {
         metalAllocatedMB: sampleMetalAllocatedMB()
       )
     )
+    // Sortie 5: forward the post-load Metal reading to the shared
+    // sampler so a `metalBufferAllocated` event is emitted when the
+    // delta vs. the previous load boundary exceeds 10 MB.
+    await sampleMetalForLoadBoundary()
     return box.value
   }
 }
@@ -1156,6 +1204,10 @@ extension AudioModelManager {
         metalAllocatedMB: sampleMetalAllocatedMB()
       )
     )
+    // Sortie 5: forward the post-load Metal reading to the shared
+    // sampler so a `metalBufferAllocated` event is emitted when the
+    // delta vs. the previous load boundary exceeds 10 MB.
+    await sampleMetalForLoadBoundary()
     return result
   }
 }
