@@ -48,8 +48,6 @@ let package = Package(
             .upToNextMajor(from: "1.4.1")),
         .package(url: "https://github.com/apple/swift-crypto.git",
             .upToNextMajor(from: "4.5.0")),
-        .package(url: "https://github.com/ibireme/yyjson.git",
-            .upToNextMajor(from: "0.12.0")),
     ],
     targets: [
         // MARK: - MLXAudioCore
@@ -87,7 +85,6 @@ let package = Package(
                 .product(name: "ComplexModule", package: "swift-numerics"),
                 .product(name: "OrderedCollections", package: "swift-collections"),
                 .product(name: "Crypto", package: "swift-crypto"),
-                .product(name: "yyjson", package: "yyjson"),
             ],
             path: "Sources/MLXAudioCodecs",
             swiftSettings: [
