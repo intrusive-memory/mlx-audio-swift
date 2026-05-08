@@ -5,6 +5,7 @@ Read and follow all instructions in [AGENTS.md](AGENTS.md) before starting any t
 ## References
 
 - **Telemetry**: see [docs/TELEMETRY_USAGE.md](docs/TELEMETRY_USAGE.md) for level/env-var/Instruments examples.
+- **Telemetry public API** (event vocabulary, reporter protocol, injection patterns, invariants): [docs/TELEMETRY.md](docs/TELEMETRY.md)
 - Full telemetry specification: [docs/TELEMETRY_REQUIREMENTS.md](docs/TELEMETRY_REQUIREMENTS.md)
 
 ## Additional Rules for Claude
