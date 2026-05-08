@@ -1160,13 +1160,16 @@ public class Qwen3ASRModel: Module {
         maxBatchSize: Int = Qwen3ASRModel.defaultMaxBatchSize
     ) -> STTOutput {
         // Emit sttTranscriptionStart — fire-and-forget because generate() is synchronous.
+        // Capture the Sendable reporter (not self) so the detached Task never
+        // touches the non-Sendable model.
         let audioSampleCount = audio.size
-        if telemetry != nil {
-            Task { [weak self] in
-                await self?.emit(.sttTranscriptionStart(
+        let capturedSampleRate = sampleRate
+        if let reporter = telemetry {
+            Task {
+                await reporter.capture(.sttTranscriptionStart(
                     model: "qwen3-asr",
                     audioSamples: audioSampleCount,
-                    sampleRate: self?.sampleRate ?? 16000
+                    sampleRate: capturedSampleRate
                 ))
             }
         }
@@ -1189,9 +1192,9 @@ public class Qwen3ASRModel: Module {
             }
             let elapsed = Date().timeIntervalSince(startTime)
             let textLen = result.text.count
-            if telemetry != nil {
-                Task { [weak self] in
-                    await self?.emit(.sttTranscriptionComplete(
+            if let reporter = telemetry {
+                Task {
+                    await reporter.capture(.sttTranscriptionComplete(
                         model: "qwen3-asr",
                         durationSeconds: elapsed,
                         textLength: textLen
@@ -1210,9 +1213,9 @@ public class Qwen3ASRModel: Module {
 
         let elapsed = Date().timeIntervalSince(startTime)
         let textLen = result.text.count
-        if telemetry != nil {
-            Task { [weak self] in
-                await self?.emit(.sttTranscriptionComplete(
+        if let reporter = telemetry {
+            Task {
+                await reporter.capture(.sttTranscriptionComplete(
                     model: "qwen3-asr",
                     durationSeconds: elapsed,
                     textLength: textLen
@@ -1360,15 +1363,20 @@ public class Qwen3ASRModel: Module {
         let streamStartTime = Date()
 
         // Emit sttTranscriptionStart — fire-and-forget from synchronous context.
-        if telemetry != nil {
-            Task { [weak self] in
-                await self?.emit(.sttTranscriptionStart(
+        let capturedSampleRate = sampleRate
+        if let reporter = telemetry {
+            Task {
+                await reporter.capture(.sttTranscriptionStart(
                     model: "qwen3-asr",
                     audioSamples: audioSampleCount,
-                    sampleRate: self?.sampleRate ?? 16000
+                    sampleRate: capturedSampleRate
                 ))
             }
         }
+
+        // Snapshot the reporter so the stream's detached completion/error
+        // Tasks can capture a Sendable value instead of `self`.
+        let streamReporter = telemetry
 
         return AsyncThrowingStream { continuation in
             // Track the current pipeline phase so the catch block can
@@ -1532,12 +1540,14 @@ public class Qwen3ASRModel: Module {
                 // Emit sttTranscriptionComplete — fire-and-forget.
                 let elapsed = Date().timeIntervalSince(streamStartTime)
                 let textLen = text.count
-                Task { [weak self] in
-                    await self?.emit(.sttTranscriptionComplete(
-                        model: "qwen3-asr",
-                        durationSeconds: elapsed,
-                        textLength: textLen
-                    ))
+                if let reporter = streamReporter {
+                    Task {
+                        await reporter.capture(.sttTranscriptionComplete(
+                            model: "qwen3-asr",
+                            durationSeconds: elapsed,
+                            textLength: textLen
+                        ))
+                    }
                 }
 
                 continuation.finish()
@@ -1546,12 +1556,14 @@ public class Qwen3ASRModel: Module {
                 // was thrown. The error is re-thrown to the stream consumer.
                 let errorString = String(describing: error)
                 let phase = currentPhase
-                Task { [weak self] in
-                    await self?.emit(.sttTranscriptionError(
-                        model: "qwen3-asr",
-                        phase: phase,
-                        error: errorString
-                    ))
+                if let reporter = streamReporter {
+                    Task {
+                        await reporter.capture(.sttTranscriptionError(
+                            model: "qwen3-asr",
+                            phase: phase,
+                            error: errorString
+                        ))
+                    }
                 }
                 continuation.finish(throwing: error)
             }

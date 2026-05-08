@@ -128,9 +128,14 @@ struct MimiTelemetryTests {
         let unattachedMock = MockMLXAudioTelemetryReporter()
 
         // Synchronous encode — no reporter attached.
+        // Bind to sync function types to force overload resolution to pick
+        // the non-async overloads (Swift 6.2 in async contexts otherwise
+        // prefers the async variants).
         let audio = makeTinyAudio()
-        let codes = mimi.encode(audio)
-        let _ = mimi.decode(codes)
+        let syncEncode: (MLXArray) -> MLXArray = mimi.encode
+        let syncDecode: (MLXArray) -> MLXArray = mimi.decode
+        let codes = syncEncode(audio)
+        let _ = syncDecode(codes)
 
         let count = await unattachedMock.eventCount()
         #expect(count == 0,
@@ -202,8 +207,11 @@ struct MimiTelemetryTests {
         mimi.setTelemetry(mock)
 
         let audio = makeTinyAudio()  // [1, 1, 480]
-        // Use sync encode to get codes (no events from the sync path)
-        let codes = mimi.encode(audio)
+        // Use sync encode to get codes (no events from the sync path).
+        // Bind to a sync function type so overload resolution picks the
+        // non-async overload from this async test context.
+        let syncEncode: (MLXArray) -> MLXArray = mimi.encode
+        let codes = syncEncode(audio)
         // Then async decode
         let _ = await mimi.decode(codes)
 
@@ -493,12 +501,16 @@ struct MimiTelemetryTests {
         let audio = makeTinyAudio()
 
         // Synchronous encode — must not require `await` and must not crash.
-        let codes = mimi.encode(audio)
+        // Bind to sync function types so overload resolution picks the
+        // non-async overloads from this async test context.
+        let syncEncode: (MLXArray) -> MLXArray = mimi.encode
+        let syncDecode: (MLXArray) -> MLXArray = mimi.decode
+        let codes = syncEncode(audio)
         #expect(codes.shape.count >= 1,
                 "Sync encode should return a codes tensor with at least 1 dimension")
 
         // Synchronous decode — must not require `await` and must not crash.
-        let decoded = mimi.decode(codes)
+        let decoded = syncDecode(codes)
         #expect(decoded.shape.count >= 1,
                 "Sync decode should return an audio tensor with at least 1 dimension")
 

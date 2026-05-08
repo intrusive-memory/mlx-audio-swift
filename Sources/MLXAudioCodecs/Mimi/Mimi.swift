@@ -268,7 +268,11 @@ public final class Mimi: Module {
         await emit(.codecEncodeStart(codec: "mimi", inputSamples: inputSamples))
 
         let start = Date()
-        let result = encode(xs)
+        // Bind to a sync function type so overload resolution picks the
+        // non-async `encode`; from an async context Swift otherwise prefers
+        // the async overload, which would recurse into this method.
+        let syncEncode: (MLXArray) -> MLXArray = self.encode
+        let result = syncEncode(xs)
         let elapsed = Date().timeIntervalSince(start)
 
         let inputBytes = inputSamples * inputChannels * 4 // Float32
@@ -342,7 +346,9 @@ public final class Mimi: Module {
         await emit(.codecDecodeStart(codec: "mimi", codedFrames: codedFrames))
 
         let start = Date()
-        let audioValues = decode(codes)
+        // See `encode(_:) async` for why we bind to a sync function type.
+        let syncDecode: (MLXArray) -> MLXArray = self.decode
+        let audioValues = syncDecode(codes)
         let elapsed = Date().timeIntervalSince(start)
 
         // outputSamples: last dimension of [B, 1, T].
@@ -387,7 +393,9 @@ public final class Mimi: Module {
         await emit(.codecEncodeStart(codec: "mimi", inputSamples: inputSamples))
 
         let start = Date()
-        let result = encodeStep(xs)
+        // See `encode(_:) async` for why we bind to a sync function type.
+        let syncEncodeStep: (MLXArray) -> MLXArray = self.encodeStep
+        let result = syncEncodeStep(xs)
         let elapsed = Date().timeIntervalSince(start)
 
         let inputBytes = inputSamples * inputChannels * 4 // Float32
@@ -531,7 +539,9 @@ public final class MimiStreamingDecoder {
         await emit(.codecDecodeStart(codec: "mimi", codedFrames: codedFrames))
 
         let start = Date()
-        let result = decodeFrames(tokens)
+        // See `Mimi.encode(_:) async` for why we bind to a sync function type.
+        let syncDecodeFrames: (MLXArray) -> MLXArray = self.decodeFrames
+        let result = syncDecodeFrames(tokens)
         let elapsed = Date().timeIntervalSince(start)
 
         // outputSamples: last dimension of [B, 1, S].

@@ -121,9 +121,14 @@ struct EncodecTelemetryTests {
         let unattachedMock = MockMLXAudioTelemetryReporter()
 
         // Synchronous encode then decode — no reporter attached.
+        // Bind to sync function types to force overload resolution to pick
+        // the non-async overloads (Swift 6.2 in async contexts otherwise
+        // prefers the async variants).
         let audio = makeTinyAudio()
-        let (codes, scales) = encodec.encode(audio, bandwidth: 1.5)
-        let _ = encodec.decode(codes, scales)
+        let syncEncode: (MLXArray, MLXArray?, Float?) -> (MLXArray, [MLXArray?]) = encodec.encode
+        let syncDecode: (MLXArray, [MLXArray?], MLXArray?) -> MLXArray = encodec.decode
+        let (codes, scales) = syncEncode(audio, nil, 1.5)
+        let _ = syncDecode(codes, scales, nil)
 
         let count = await unattachedMock.eventCount()
         #expect(count == 0,
@@ -187,8 +192,11 @@ struct EncodecTelemetryTests {
         encodec.setTelemetry(mock)
 
         let audio = makeTinyAudio()  // [1, 1000, 1]
-        // Use sync encode to get codes (no events from this path)
-        let (codes, scales) = encodec.encode(audio, bandwidth: 1.5)
+        // Use sync encode to get codes (no events from this path).
+        // Bind to a sync function type so overload resolution picks the
+        // non-async overload from this async test context.
+        let syncEncode: (MLXArray, MLXArray?, Float?) -> (MLXArray, [MLXArray?]) = encodec.encode
+        let (codes, scales) = syncEncode(audio, nil, 1.5)
         // Then async decode
         let _ = await encodec.decode(codes, scales)
 
@@ -442,12 +450,16 @@ struct EncodecTelemetryTests {
         let audio = makeTinyAudio()
 
         // Synchronous encode — must not require `await` and must not crash.
-        let (codes, scales) = encodec.encode(audio, bandwidth: 1.5)
+        // Bind to sync function types so overload resolution picks the
+        // non-async overloads from this async test context.
+        let syncEncode: (MLXArray, MLXArray?, Float?) -> (MLXArray, [MLXArray?]) = encodec.encode
+        let syncDecode: (MLXArray, [MLXArray?], MLXArray?) -> MLXArray = encodec.decode
+        let (codes, scales) = syncEncode(audio, nil, 1.5)
         #expect(codes.shape.count >= 1,
                 "Sync encode should return a codes tensor with at least 1 dimension")
 
         // Synchronous decode — must not require `await` and must not crash.
-        let decoded = encodec.decode(codes, scales)
+        let decoded = syncDecode(codes, scales, nil)
         #expect(decoded.shape.count >= 1,
                 "Sync decode should return an audio tensor with at least 1 dimension")
 

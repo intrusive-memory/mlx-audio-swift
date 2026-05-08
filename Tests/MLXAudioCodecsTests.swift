@@ -44,11 +44,14 @@ struct SNACTests {
         // 3. Reshape audio for SNAC: [batch, channels, samples]
         let audioInput = audioData.reshaped([1, 1, audioData.shape[0]])
 
-        // 4. Encode audio to codes
-        let codes = snac.encode(audioInput)
+        // 4. Encode audio to codes — bind to sync function types so overload
+        //    resolution picks the non-async overloads from this async test.
+        let syncEncode: (MLXArray) -> [MLXArray] = snac.encode
+        let syncDecode: ([MLXArray]) -> MLXArray = snac.decode
+        let codes = syncEncode(audioInput)
 
         // 5. Decode codes back to audio
-        let reconstructed = snac.decode(codes)
+        let reconstructed = syncDecode(codes)
 
         // 6. Save reconstructed audio to the same media folder as input
         let outputURL = audioURL.deletingLastPathComponent().appendingPathComponent("intention_snac_reconstructed.wav")
@@ -86,11 +89,14 @@ struct MimiTests {
         // 3. Reshape audio for Mimi: [batch, channels, samples]
         let audioInput = audioData.reshaped([1, 1, audioData.shape[0]])
 
-        // 4. Encode audio to codes
-        let codes = mimi.encode(audioInput)
+        // 4. Encode audio to codes — bind to sync function types so overload
+        //    resolution picks the non-async overloads from this async test.
+        let syncEncode: (MLXArray) -> MLXArray = mimi.encode
+        let syncDecode: (MLXArray) -> MLXArray = mimi.decode
+        let codes = syncEncode(audioInput)
 
         // 5. Decode codes back to audio
-        let reconstructed = mimi.decode(codes)
+        let reconstructed = syncDecode(codes)
         GPU.clearCache()
 
         // 6. Save reconstructed audio

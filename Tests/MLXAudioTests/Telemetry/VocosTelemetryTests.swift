@@ -122,9 +122,12 @@ struct VocosTelemetryTests {
         let unattachedMock = MockMLXAudioTelemetryReporter()
 
         // Synchronous decode — no reporter attached, so nothing should
-        // flow to the unattachedMock.
+        // flow to the unattachedMock. Bind to a sync function type so
+        // overload resolution picks the non-async overload from this
+        // async test context.
         let input = makeTinyInput()
-        let _ = vocos.decode(input)
+        let syncDecode: (MLXArray, MLXArray?) -> MLXArray = vocos.decode
+        let _ = syncDecode(input, nil)
 
         let count = await unattachedMock.eventCount()
         #expect(count == 0,
@@ -316,7 +319,10 @@ struct VocosTelemetryTests {
         let input = makeTinyInput()
 
         // Synchronous decode — must not require `await` and must not crash.
-        let syncOutput = vocos.decode(input)
+        // Bind to a sync function type so overload resolution picks the
+        // non-async overload from this async test context.
+        let syncDecode: (MLXArray, MLXArray?) -> MLXArray = vocos.decode
+        let syncOutput = syncDecode(input, nil)
         #expect(syncOutput.shape.count >= 1,
                 "Sync decode should return a tensor with at least 1 dimension")
 

@@ -137,9 +137,14 @@ struct DACVAETelemetryTests {
         let unattachedMock = MockMLXAudioTelemetryReporter()
 
         // Synchronous encode then decode — no reporter attached.
+        // Bind to sync function types to force overload resolution to pick
+        // the non-async overloads (Swift 6.2 in async contexts otherwise
+        // prefers the async variants).
         let waveform = makeTinyWaveform()
-        let latent = model.encode(waveform)
-        let _ = model.decode(latent)
+        let syncEncode: (MLXArray) -> MLXArray = model.encode
+        let syncDecode: (MLXArray, Int?) -> MLXArray = model.decode
+        let latent = syncEncode(waveform)
+        let _ = syncDecode(latent, nil)
 
         let count = await unattachedMock.eventCount()
         #expect(count == 0,
@@ -203,8 +208,11 @@ struct DACVAETelemetryTests {
         model.setTelemetry(mock)
 
         // Use sync encode to produce latent (no events from sync path).
+        // Bind to a sync function type so overload resolution picks the
+        // non-async overload from this async test context.
         let waveform = makeTinyWaveform()  // [1, 800, 1]
-        let latent = model.encode(waveform)
+        let syncEncode: (MLXArray) -> MLXArray = model.encode
+        let latent = syncEncode(waveform)
         // Then async decode
         let _ = await model.decode(latent)
 
@@ -432,12 +440,16 @@ struct DACVAETelemetryTests {
         let waveform = makeTinyWaveform()
 
         // Synchronous encode — must not require `await` and must not crash.
-        let latent = model.encode(waveform)
+        // Bind to sync function types so overload resolution picks the
+        // non-async overloads from this async test context.
+        let syncEncode: (MLXArray) -> MLXArray = model.encode
+        let syncDecode: (MLXArray, Int?) -> MLXArray = model.decode
+        let latent = syncEncode(waveform)
         #expect(latent.shape.count >= 1,
                 "Sync encode should return a tensor with at least 1 dimension")
 
         // Synchronous decode — must not require `await` and must not crash.
-        let decoded = model.decode(latent)
+        let decoded = syncDecode(latent, nil)
         #expect(decoded.shape.count >= 1,
                 "Sync decode should return a tensor with at least 1 dimension")
 
@@ -466,8 +478,11 @@ struct DACVAETelemetryTests {
         model.setTelemetry(mock)
 
         // Build encoded frames directly (sync encode path — no events).
+        // Bind to a sync function type so overload resolution picks the
+        // non-async overload from this async test context.
         let waveform = makeTinyWaveform()
-        let latent = model.encode(waveform)
+        let syncEncode: (MLXArray) -> MLXArray = model.encode
+        let latent = syncEncode(waveform)
 
         // Async decode — only the boundary events should appear.
         let _ = await model.decode(latent)

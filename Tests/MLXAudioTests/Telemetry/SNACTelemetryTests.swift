@@ -132,9 +132,14 @@ struct SNACTelemetryTests {
         let unattachedMock = MockMLXAudioTelemetryReporter()
 
         // Synchronous encode then decode — no reporter attached.
+        // Bind to sync function types to force overload resolution to pick
+        // the non-async overloads (Swift 6.2 in async contexts otherwise
+        // prefers the async variants).
         let audio = makeTinyAudio()
-        let codes = snac.encode(audio)
-        let _ = snac.decode(codes)
+        let syncEncode: (MLXArray) -> [MLXArray] = snac.encode
+        let syncDecode: ([MLXArray]) -> MLXArray = snac.decode
+        let codes = syncEncode(audio)
+        let _ = syncDecode(codes)
 
         let count = await unattachedMock.eventCount()
         #expect(count == 0,
@@ -198,8 +203,11 @@ struct SNACTelemetryTests {
         snac.setTelemetry(mock)
 
         let audio = makeTinyAudio()  // [1, 1, 256]
-        // Use sync encode to get codes (no events from this path)
-        let codes = snac.encode(audio)
+        // Use sync encode to get codes (no events from this path).
+        // Bind to a sync function type so overload resolution picks the
+        // non-async overload from this async test context.
+        let syncEncode: (MLXArray) -> [MLXArray] = snac.encode
+        let codes = syncEncode(audio)
         // Then async decode
         let _ = await snac.decode(codes)
 
@@ -453,12 +461,16 @@ struct SNACTelemetryTests {
         let audio = makeTinyAudio()
 
         // Synchronous encode — must not require `await` and must not crash.
-        let codes = snac.encode(audio)
+        // Bind to sync function types so overload resolution picks the
+        // non-async overloads from this async test context.
+        let syncEncode: (MLXArray) -> [MLXArray] = snac.encode
+        let syncDecode: ([MLXArray]) -> MLXArray = snac.decode
+        let codes = syncEncode(audio)
         #expect(!codes.isEmpty,
                 "Sync encode should return a non-empty codes array")
 
         // Synchronous decode — must not require `await` and must not crash.
-        let decoded = snac.decode(codes)
+        let decoded = syncDecode(codes)
         #expect(decoded.shape.count >= 1,
                 "Sync decode should return an audio tensor with at least 1 dimension")
 

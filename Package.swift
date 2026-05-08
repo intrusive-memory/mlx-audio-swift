@@ -224,6 +224,7 @@ let package = Package(
                 "MLXAudioTTS",
                 "MLXAudioSTT",
                 "MLXAudioSTS",
+                .product(name: "MLXRandom", package: "mlx-swift"),
             ],
             path: "Tests",
             resources: [

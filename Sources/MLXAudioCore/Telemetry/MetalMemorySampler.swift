@@ -178,7 +178,7 @@ public actor MetalMemorySampler {
         // -threshold is suppressed. The prompt's wording ("exceeds
         // 10 MB") matches strict greater-than.
         if delta > thresholdMB {
-            await Self.emit(
+            await emit(
                 .metalBufferAllocated(
                     allocatedMB: currentMB,
                     peakMB: peakMB
@@ -188,7 +188,7 @@ public actor MetalMemorySampler {
         } else if delta < -thresholdMB {
             // `freedMB` is the magnitude of the drop (positive
             // number). `remainingMB` is the absolute current value.
-            await Self.emit(
+            await emit(
                 .metalBufferDeallocated(
                     freedMB: -delta,
                     remainingMB: currentMB
@@ -216,16 +216,16 @@ public actor MetalMemorySampler {
 
     // MARK: - Internal Telemetry Helper
 
-    /// Canonical-shape `emit(_:)` helper, adapted to the static-context
-    /// the sampler emits from. The `@autoclosure` is preserved so a
-    /// `nil` reporter performs zero payload work — see invariant 6 of
-    /// REQUIREMENTS §6 and the canonical 4-line snippet in
+    /// Canonical-shape `emit(_:)` helper. The `@autoclosure` is preserved
+    /// so a `nil` reporter performs zero payload work — see invariant 6
+    /// of REQUIREMENTS §6 and the canonical 4-line snippet in
     /// `MLXAudioTelemetryReporter.swift`.
     ///
-    /// `static` because the sampler accepts the reporter per-call
-    /// rather than holding it as instance state; making this static
-    /// signals that there is no per-instance reporter to close over.
-    private static func emit(
+    /// Instance method (not `static`) so it inherits the actor's
+    /// isolation: the autoclosure captures `peakMB` from the caller,
+    /// which is actor-isolated state, and evaluating the closure inside
+    /// an actor-isolated method keeps the capture on-actor.
+    private func emit(
         _ event: @autoclosure () -> MLXAudioTelemetryEvent,
         to reporter: (any MLXAudioTelemetryReporter)?
     ) async {
