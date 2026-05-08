@@ -4,6 +4,9 @@
 //
 //  Created by Rudrank Riyam on 6/11/25.
 //
+//  Sortie 17 of OPERATION SILENT STETHOSCOPE — `audioBufferCacheGrowth`
+//  telemetry wired to the internal `bufferCache` insertion path.
+//
 
 import Foundation
 import AVFoundation
@@ -27,12 +30,99 @@ public class AudioPlayerManager: NSObject, ObservableObject {
     private var isStreaming: Bool = false
     private var scheduledSamples: Int = 0
 
+    // MARK: - Internal Buffer Cache
+    //
+    // `bufferCache` stores pre-loaded `AVAudioPCMBuffer` objects keyed
+    // by their source URL so that repeated playback of the same URL
+    // avoids redundant disk reads. The cache grows monotonically during
+    // a session; eviction is left to the caller (e.g. `stop()` ­does not
+    // evict so seek/replay is zero-cost). `audioBufferCacheGrowth` is
+    // emitted whenever a new entry is *inserted* — never on a cache hit.
+    private var bufferCache: [URL: AVAudioPCMBuffer] = [:]
+
+    // MARK: - Telemetry (Sortie 17)
+
+    /// Attached reporter. `nil` by default — zero overhead when unset.
+    private var telemetry: (any MLXAudioTelemetryReporter)?
+
+    /// Attach (or detach) a telemetry reporter.
+    ///
+    /// Set to `nil` to silence all telemetry emission from this
+    /// instance. Setting a reporter has no effect on existing playback.
+    public func setTelemetry(_ reporter: (any MLXAudioTelemetryReporter)?) {
+        telemetry = reporter
+    }
+
+    /// Canonical per-instance emit helper (copied verbatim from
+    /// `MLXAudioTelemetryReporter.swift` doc comment per Sortie 17).
+    ///
+    /// The `@autoclosure` is load-bearing: when `telemetry` is `nil`
+    /// the closure is never evaluated, so payload construction is
+    /// zero-cost (invariant 3).
+    private func emit(_ event: @autoclosure () -> MLXAudioTelemetryEvent) async {
+        guard let telemetry else { return }
+        await telemetry.capture(event())
+    }
+
     public override init() {
         super.init()
     }
 
     @MainActor deinit {
         stop()
+    }
+
+    // MARK: - Buffer Cache Helpers
+
+    /// Return the cached `AVAudioPCMBuffer` for `url`, or `nil` on a
+    /// cache miss (without inserting anything — insertion is a separate step).
+    ///
+    /// This is the *cache-hit* path: no emission occurs here.
+    public func cachedBuffer(for url: URL) -> AVAudioPCMBuffer? {
+        bufferCache[url]
+    }
+
+    /// Insert `buffer` into the cache under `key` and emit
+    /// `audioBufferCacheGrowth`. No-op (and no emission) when the key
+    /// already exists — the caller is responsible for checking
+    /// `cachedBuffer(for:)` first when they want cache-hit semantics.
+    ///
+    /// This is the *insertion* path: `audioBufferCacheGrowth` is emitted
+    /// here and only here.
+    public func cacheBuffer(_ buffer: AVAudioPCMBuffer, for key: URL) async {
+        // Guard: do not replace an existing entry; callers that want
+        // upsert semantics must evict first with `evictBuffer(for:)`.
+        guard bufferCache[key] == nil else { return }
+
+        bufferCache[key] = buffer
+
+        // Compute approximate total cached size in MB.
+        // `AVAudioPCMBuffer.frameLength` × channels × 4 bytes / 1 MiB.
+        let totalBytes = bufferCache.values.reduce(0) { acc, buf in
+            let channels = Int(buf.format.channelCount)
+            return acc + Int(buf.frameLength) * channels * MemoryLayout<Float>.size
+        }
+        let totalMB = Double(totalBytes) / (1024 * 1024)
+
+        // Emission is insertion-path only; never called from
+        // per-frame loops.
+        await emit(.audioBufferCacheGrowth(
+            entriesCount: bufferCache.count,
+            totalMB: totalMB
+        ))
+    }
+
+    /// Remove a single entry from the cache.
+    ///
+    /// Cache shrinkage is *not* a telemetry event — `audioBufferCacheGrowth`
+    /// tracks insertions only.
+    public func evictBuffer(for key: URL) {
+        bufferCache.removeValue(forKey: key)
+    }
+
+    /// Discard the entire cache. Does not emit a telemetry event.
+    public func clearBufferCache() {
+        bufferCache.removeAll(keepingCapacity: false)
     }
 
     // MARK: - Playback Control
