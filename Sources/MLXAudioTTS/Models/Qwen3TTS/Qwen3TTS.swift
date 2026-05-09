@@ -931,7 +931,16 @@ public final class Qwen3TTSModel: Module, SpeechGenerationModel, @unchecked Send
         var trailingIdx = 0
         var inputEmbeds = inputEmbedsInit
 
+        // Adaptive repetition penalty: decay from basePenalty to 1.0 as generation grows
+        // to prevent pathological suppression of sustained vowels in long generations.
+        let basePenalty = repetitionPenalty
+        let decayConstant: Float = 200.0  // Tunable: controls how quickly penalty decays
+
         for step in 0 ..< maxTokens {
+            // Compute adaptive repetition penalty based on current generation length
+            let decayFactor = exp(-Float(generatedCodes.count) / decayConstant)
+            let effectiveRepPenalty = 1.0 + (basePenalty - 1.0) * decayFactor
+
             // Forward pass through talker
             let (logits, hidden) = talker(inputEmbeds, cache: cache)
 
@@ -944,7 +953,7 @@ public final class Qwen3TTSModel: Module, SpeechGenerationModel, @unchecked Send
                 logits,
                 temperature: temperature,
                 topP: topP,
-                repetitionPenalty: repetitionPenalty,
+                repetitionPenalty: effectiveRepPenalty,
                 generatedTokens: generatedCodes.map { Int($0[0, 0].item(Int32.self)) },
                 suppressTokens: suppressTokens,
                 eosTokenId: eosTokenId
@@ -954,6 +963,13 @@ public final class Qwen3TTSModel: Module, SpeechGenerationModel, @unchecked Send
             let tokenId = Int(nextToken[0, 0].item(Int32.self))
             onToken?(tokenId)
             if tokenId == eosTokenId { break }
+
+            // Telemetry: log adaptive penalty every 50 steps
+            if step > 0 && step % 50 == 0 {
+                FileHandle.standardError.write(Data(
+                    "[AdaptiveRepPenalty] step=\(step), codes=\(generatedCodes.count), penalty=\(String(format: "%.3f", effectiveRepPenalty))\n".utf8
+                ))
+            }
 
             // Generate remaining codebook tokens with code predictor
             var codeTokens = [nextToken]
