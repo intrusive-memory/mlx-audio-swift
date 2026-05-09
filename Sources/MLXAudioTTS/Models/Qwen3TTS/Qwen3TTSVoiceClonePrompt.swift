@@ -258,6 +258,19 @@ extension Qwen3TTSModel {
         let targetTokenCount = tokenizer.encode(text: text).count
         let effectiveMaxTokens = min(maxTokens, max(200, targetTokenCount * 12))
 
+        // Step 2.5: Adaptive temperature scaling for long generations
+        // Reduces sampling variance in long utterances to prevent prosodic drift
+        let estimatedCodes = targetTokenCount * 4  // Rough estimate: 1 text token ≈ 4 audio codes
+        let temperatureScaleFactor: Float = 0.3  // Reduce by up to 30% for very long generations
+        let maxCodesForScaling: Float = 400.0  // Full scaling kicks in at 400 codes
+        let scalingRatio = min(1.0, Float(estimatedCodes) / maxCodesForScaling)
+        let adaptiveTemperature = temperature * (1.0 - temperatureScaleFactor * scalingRatio)
+
+        // Telemetry: Log adaptive temperature calculation
+        FileHandle.standardError.write(Data(
+            "[AdaptiveTemp] estimatedCodes=\(estimatedCodes), scalingRatio=\(String(format: "%.3f", scalingRatio)), baseTemp=\(temperature), adaptiveTemp=\(String(format: "%.3f", adaptiveTemperature))\n".utf8
+        ))
+
         // Step 3: Use caller's repetition penalty
         let effectiveRepPenalty = repetitionPenalty
 
@@ -271,7 +284,7 @@ extension Qwen3TTSModel {
             inputEmbeds: inputEmbeds,
             trailingTextHidden: trailingTextHidden,
             ttsPadEmbed: ttsPadEmbed,
-            temperature: temperature,
+            temperature: adaptiveTemperature,
             topP: topP,
             repetitionPenalty: effectiveRepPenalty,
             maxTokens: effectiveMaxTokens
