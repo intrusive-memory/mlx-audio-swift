@@ -77,8 +77,9 @@ let package = Package(
         .package(url: "https://github.com/ml-explore/mlx-swift-lm.git",
             .upToNextMajor(from: "3.31.3")),
         // swift-tokenizers 0.5.0+ is Swift-only; no traits needed.
+        // Pinned to 0.5.x — 0.6.0 is a breaking change; do not bump until callers are migrated.
         .package(url: "https://github.com/DePasqualeOrg/swift-tokenizers.git",
-            .upToNextMajor(from: "0.5.0")),
+            .upToNextMinor(from: "0.5.0")),
         sibling(
           "SwiftAcervo",
           remote: "https://github.com/intrusive-memory/SwiftAcervo.git",
