@@ -2,6 +2,8 @@
 
 **Status:** Not started. swift-tokenizers is currently pinned in `Package.swift` to `.upToNextMinor(from: "0.5.0")` (resolves to 0.5.0). Bump to `.upToNextMinor(from: "0.6.0")` after this checklist is complete.
 
+**Versioning impact:** This migration is a **source-breaking change for consumers of mlx-audio-swift** (see "Migration philosophy" below). It must ship as the next minor bump (`0.9.0`), not a patch. Do not bundle it into a `0.8.x` patch release.
+
 **Owner:** TBD
 **Last updated:** 2026-05-10
 
@@ -19,6 +21,74 @@
 The previous behaviour silently returned empty strings or `assertionFailure`d on bad input. The throwing API exposes those failures (`.invalidTokenId`, `.invalidStreamingPrefix`) at the call site.
 
 This is a **source-breaking** change: every existing call to one of the now-throwing methods will fail to compile until `try` is added and the call chain accepts the throw.
+
+---
+
+## Migration philosophy
+
+**The 0.6.0 redesign is not a mechanical inconvenience — it's a deliberate philosophical statement.** The upstream maintainers concluded that swallowing tokenizer failures (returning `""`, `assertionFailure`-ing, or trapping) hides real bugs from the application layer. The fix is to surface the failure as a typed error at the call site and let it propagate to whoever is in a position to make a recovery decision.
+
+**We are adopting that philosophy, not insulating consumers from it.** Where the upstream library bubbles `TokenizerError` up to its caller, mlx-audio-swift will bubble it up to *its* caller — the application embedding our TTS/STT models. The natural consequence is that public APIs in mlx-audio-swift that today silently absorb tokenizer failure (or trap on bad input) become `throws` themselves.
+
+**Concretely, this means:**
+
+1. **Default is to propagate.** When a public function in `MLXAudioTTS` / `MLXAudioSTT` calls a now-throwing tokenizer method, the public function gains `throws`. We do **not** internally `do/catch` and convert the error into an empty string, an `Optional`, a sentinel value, or a logged-and-ignored side effect.
+2. **`try?` is forbidden in production paths.** It collapses every `TokenizerError` case into `nil`, erasing exactly the information 0.6.0 was built to expose.
+3. **`try!` is forbidden.** It re-introduces the trap-on-bad-input behaviour we are explicitly moving away from.
+4. **`assert` / `precondition` are not substitutes for throwing.** A debug-only check still ships a release binary that silently misbehaves.
+5. **Existing force-unwraps on `Optional` tokenizers (`tokenizer!.encode(...)`) are bugs that 0.6.0 lets us correct properly.** Replace them by throwing a domain-specific error from our layer (e.g. `MLXAudioError.tokenizerNotLoaded`) — not by adding `guard ... else { return ... }` with a sentinel.
+
+**This is a breaking change for consumers of mlx-audio-swift.** Calling code that today does `let ids = model.tokenize(text)` will, after this migration, need to do `let ids = try model.tokenize(text)` and decide what to do on failure. That is the *correct* state of affairs — silent tokenizer failure in a TTS pipeline produces silent garbage audio downstream, which is exactly the class of bug 0.6.0 helps us catch. The cost is a one-time `try` addition for every consumer; the benefit is recurring.
+
+**Versioning consequence.** Because we are pre-1.0, breaking changes ship as a minor bump. This migration is therefore the catalyst for `0.9.0`. The release notes should call out the throwing-API change as the headline migration item with a brief code example.
+
+---
+
+## Anti-patterns to avoid during the migration
+
+Reject these patterns in code review:
+
+```swift
+// ❌ Erases the typed error.
+let ids = try? tokenizer.encode(text: prompt) ?? []
+
+// ❌ Catches and logs without propagating.
+do { return try tokenizer.decode(tokenIds: tokens) }
+catch { logger.error("tokenizer failed"); return "" }
+
+// ❌ Replaces a throw with a trap. Same failure mode 0.6.0 fixes.
+let ids = try! tokenizer.encode(text: prompt)
+
+// ❌ Hides nil tokenizer behind a sentinel. The function should throw.
+guard let tokenizer else { return MLXArray([]) }
+```
+
+The acceptable shapes are:
+
+```swift
+// ✅ Propagate.
+public func tokenize(_ text: String) throws -> MLXArray {
+    let ids = try tokenizer.encode(text: text)
+    return MLXArray(ids)
+}
+
+// ✅ Translate to a domain-specific typed error, then propagate.
+public func tokenize(_ text: String) throws -> MLXArray {
+    guard let tokenizer else { throw MLXAudioError.tokenizerNotLoaded }
+    let ids = try tokenizer.encode(text: text)
+    return MLXArray(ids)
+}
+
+// ✅ Catch only when there's a meaningful, documented recovery.
+//    Comment must explain why this case is recoverable and the others aren't.
+do {
+    return try streamingDetokenizer.consume(id)
+} catch TokenizerError.invalidStreamingPrefix {
+    // Documented recovery: the byte-level model emitted a partial UTF-8
+    // sequence; wait for the next token before flushing.
+    return nil
+}
+```
 
 ---
 
@@ -114,10 +184,11 @@ extension Tokenizer {
 - [ ] **L893** — `tokenizer.encode(text: PromptTemplate.userSuffix)` inside `prepareGeneration(audio:tokenizer:)`. Function must gain `throws`.
 - [ ] **L898** — `tokenizer.encode(text: PromptTemplate.userPrefix).count` inside `prepareGeneration(audio:tokenizer:)`. Same `throws` propagation.
 
-**`GenerationContext.decode(_:)` design issue.** Both overloads return `String` directly from a struct method. In 0.6.0 they need either:
-- **Option A (preferred):** Make the methods `throws`. Audit every call chain that uses `GenerationContext.decode(...)` — if those callers run inside the generation loop, propagate `throws` upward.
-- **Option B:** Pre-decode the token to `String` before storing it in the context. Removes the live tokenizer reference from the struct entirely. More invasive but eliminates the throwing-from-a-data-struct pattern.
-- Pick one and apply consistently.
+**`GenerationContext.decode(_:)` design issue.** Both overloads return `String` directly from a struct method. Two acceptable resolutions — both propagate the error rather than swallow it:
+- **Option A (preferred):** Make the methods `throws`. Audit every call chain that uses `GenerationContext.decode(...)` — the generation loop must propagate `throws` up to the public entry point on `GLMASR`.
+- **Option B:** Pre-decode the token to `String` *at the throwing site* before storing it in the context. The throw still happens; it just happens earlier in the pipeline, and the context becomes a pure data struct with no live tokenizer reference. More invasive but architecturally cleaner.
+
+**Forbidden:** keeping the current non-throwing `decode(_:) -> String` signature by catching internally and returning `""` on failure. That re-creates the exact pre-0.6.0 silent-failure mode 0.6.0 was built to eliminate.
 
 ### 4. `Sources/MLXAudioTTS/Models/Qwen3TTS/Qwen3TTS.swift` (11 call sites — easiest file)
 
@@ -135,18 +206,14 @@ All call sites are already inside `throws` functions. Mechanical `try` addition 
 - [ ] **L416** — `tokenizer!.encode(text: refText)` inside `prepareInputIds(prompts:voice:refAudio:refText:) -> (MLXArray, MLXArray)`.
 - [ ] **L429** — `tokenizer!.encode(text: prompt)` inside the same function.
 
-The function is **public** and **non-throwing** — adding `throws` is a public-API breaking change for any consumer of `MLXAudioTTS`. Decide:
-- Make `prepareInputIds` `throws`. Update consumers.
-- *Or* drop the force-unwrap and propagate the `Optional` (`encode` requires a non-nil tokenizer; if `nil`, throw a domain-specific error from this layer).
-
-Address the force-unwrap as part of the migration regardless — silent `assertionFailure` is exactly the failure mode 0.6.0 surfaces.
+The function is **public** and **non-throwing**. Per the migration philosophy, `prepareInputIds` becomes `throws` — this is one of the breaking changes consumers will see. Replace the `tokenizer!` force-unwrap with a `guard let tokenizer else { throw MLXAudioError.tokenizerNotLoaded }` so the nil case surfaces as a typed error instead of a runtime trap (the trap-on-bad-input behaviour is exactly what 0.6.0 lets us correct).
 
 ### 6. `Sources/MLXAudioTTS/Models/Llama/LlamaTTS.swift` (2 call sites — force-unwrap issue)
 
 - [ ] **L498** — `tokenizer!.encode(text: refText)` inside `prepareInputIds(prompts:voice:refAudio:refText:)`.
 - [ ] **L518** — `tokenizer!.encode(text: prompt)` inside the same function.
 
-Same shape as Qwen3.swift — public non-throwing function with force-unwrap. Apply the same decision consistently across both.
+Same shape as Qwen3.swift — public non-throwing function with a force-unwrap. Apply the same resolution: gain `throws`, replace `tokenizer!` with a `guard let tokenizer else { throw MLXAudioError.tokenizerNotLoaded }`. No silent-fallback variant.
 
 ### 7. `Sources/MLXAudioTTS/Models/Marvis/MarvisTTSModel.swift` (1 call site)
 
@@ -171,7 +238,7 @@ The `addSpecialTokens:` parameter is supported by the 0.6.0 `Tokenizer` extensio
 
 ## Helper / signature-propagation summary
 
-Functions that need to gain `throws` (or change return type) as a result of the migration:
+Functions that gain `throws` as a result of the migration. **Per the philosophy, every entry below is a propagation, not a "decide whether to catch".** The "Visibility" column makes the consumer-facing breaking surface explicit:
 
 | File | Function | Visibility | Notes |
 |------|----------|------------|-------|
@@ -187,7 +254,21 @@ Functions that need to gain `throws` (or change return type) as a result of the 
 | `MarvisTTSModel.swift` | `tokenizeTextSegment(text:speaker:)` | private | |
 | `Soprano.swift` | `tokenize(_:language:)` | public | **Public API change** |
 
-The four public-API changes (`Qwen3ForcedAligner.generate`, `Qwen3.prepareInputIds`, `LlamaTTS.prepareInputIds`, `Soprano.tokenize`) cascade to consumers of the `MLXAudioTTS` / `MLXAudioSTT` modules. This is what gates the 0.6.0 bump from being purely mechanical.
+The four public-API changes (`Qwen3ForcedAligner.generate`, `Qwen3.prepareInputIds`, `LlamaTTS.prepareInputIds`, `Soprano.tokenize`) cascade to consumers of the `MLXAudioTTS` / `MLXAudioSTT` modules. This is the consumer-visible breaking surface and the reason this migration ships as `0.9.0` rather than a patch.
+
+### Recommended new error type
+
+Add a domain-specific error in `MLXAudioCore` to give consumers something to `catch` against without importing `Tokenizers`. Suggested shape:
+
+```swift
+public enum MLXAudioError: Error, Sendable {
+    case tokenizerNotLoaded          // formerly `tokenizer!` force-unwrap
+    case tokenizerFailure(any Error) // wraps the upstream TokenizerError
+    // … (existing cases)
+}
+```
+
+Throwing functions in mlx-audio-swift can either let `TokenizerError` propagate as-is (simplest) or wrap it in `MLXAudioError.tokenizerFailure(_)` for a cleaner public surface. Pick one strategy and apply consistently — mixing leaks abstraction.
 
 ---
 
@@ -207,5 +288,28 @@ The four public-API changes (`Qwen3ForcedAligner.generate`, `Qwen3.prepareInputI
    - `Qwen3ASRTests`, `GLMASRTests` — exercise `decode` on real model output.
    - `Qwen3TTSTests`, `LlamaTTSTests`, `SopranoTTSTests`, `MarvisTTSGenerateTests` — exercise `encode` on real prompts.
 4. Spot-check the `_generateStreamImpl` async path for behavioural regressions (now-explicit errors that were previously silent empty strings may surface as test-visible failures even when the tokenizer is healthy).
+5. **Anti-pattern grep gate.** Before merging, run:
+   ```bash
+   # Any new try? or try! against a tokenizer call site is a regression.
+   grep -rnE 'try[?!] +\w+\.(encode|decode|tokenize|encodeBatch|applyChatTemplate)' \
+     Sources/ Tests/
+   ```
+   The expected output is empty. Any hit must be justified inline with a comment explaining the recovery, or removed.
+6. **Public-API audit.** Diff the public surface of `MLXAudioTTS` and `MLXAudioSTT` between `0.8.x` and the migration branch. Every newly-`throws` public function must appear in the `0.9.0` release notes under "Breaking changes", with a one-liner showing the consumer-side `try` addition.
 
-When this file is fully checked off, ship the `Package.swift` bump as its own commit/release. The bump itself is one line; the work is everything above.
+## Release notes (skeleton for 0.9.0)
+
+When shipping, the release notes should lead with this — not bury it:
+
+> ### Breaking: tokenizer-using APIs now throw
+>
+> mlx-audio-swift 0.9.0 adopts swift-tokenizers 0.6.0, which converts the tokenizer protocol to a typed-throws API. Public functions in `MLXAudioTTS` and `MLXAudioSTT` that internally tokenize now propagate `TokenizerError` rather than swallowing it. This is intentional: silent tokenizer failure produces silent garbage downstream, and we'd rather you see the error.
+>
+> **Migration:** add `try` (and `do/catch` or rethrowing) at every call site of:
+> - `Qwen3ForcedAligner.generate(audio:text:language:)`
+> - `Qwen3TTS.Model.prepareInputIds(...)`
+> - `LlamaTTS.Model.prepareInputIds(...)`
+> - `Soprano.tokenize(_:language:)`
+> - (full list in [docs/TODO_TOKENIZERS_0_6_MIGRATION.md](docs/TODO_TOKENIZERS_0_6_MIGRATION.md))
+
+When this file is fully checked off, ship the `Package.swift` bump and the propagation work together as `0.9.0`. The `Package.swift` change is one line; the breaking-change communication is everything around it.
