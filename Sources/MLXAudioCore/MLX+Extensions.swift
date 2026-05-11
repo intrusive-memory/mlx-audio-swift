@@ -89,8 +89,13 @@ extension MLXArray {
         let result: MLXArray
         switch dtype {
         case .float32: result = MLXArray.zeros(newShape, type: Float.self)
+        #if !arch(x86_64)
         case .float16: result = MLXArray.zeros(newShape, type: Float16.self)
         case .bfloat16: result = MLXArray.zeros(newShape, type: Float16.self)
+        #else
+        // Float16 is not available on x86_64, fall back to Float32
+        case .float16, .bfloat16: result = MLXArray.zeros(newShape, type: Float.self)
+        #endif
         case .int32: result = MLXArray.zeros(newShape, type: Int32.self)
         case .int64: result = MLXArray.zeros(newShape, type: Int64.self)
         case .bool: result = MLXArray.zeros(newShape, type: Bool.self)
@@ -161,7 +166,12 @@ extension MLXArray {
             // Return empty array if range is invalid or empty
             switch dtype {
             case .float32: return MLXArray.zeros([0], type: Float.self)
+            #if !arch(x86_64)
             case .float16: return MLXArray.zeros([0], type: Float16.self)
+            #else
+            // Float16 is not available on x86_64, fall back to Float32
+            case .float16: return MLXArray.zeros([0], type: Float.self)
+            #endif
             default: fatalError("Unsupported float dtype for empty arange: \(dtype)")
             }
         }
@@ -174,9 +184,16 @@ extension MLXArray {
         case .float32:
             let data = sequence.map { Float($0) }
             return MLXArray(data)
+        #if !arch(x86_64)
         case .float16:
             let data = sequence.map { Float16($0) }
             return MLXArray(data)
+        #else
+        // Float16 is not available on x86_64, fall back to Float32
+        case .float16:
+            let data = sequence.map { Float($0) }
+            return MLXArray(data)
+        #endif
         default:
             fatalError("Unsupported float dtype for arange: \(dtype)")
         }
