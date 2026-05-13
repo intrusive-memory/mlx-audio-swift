@@ -77,7 +77,12 @@ let package = Package(
         .package(url: "https://github.com/ml-explore/mlx-swift-lm.git",
             .upToNextMajor(from: "3.31.3")),
         // swift-tokenizers 0.5.0+ is Swift-only; no traits needed.
-        // Pinned to 0.5.x — 0.6.0 is a breaking change; do not bump until callers are migrated.
+        // Pinned to 0.5.x — 0.6.0 swaps the pure-Swift implementation for a
+        // UniFFI-based Rust artifactbundle that has known Xcode module-map /
+        // compile issues (the 0.6.2 tag ships an explicit "Temporary fix for
+        // Xcode builds" commit, 37f999a, the maintainer flagged as a possible
+        // Xcode bug). Wait for a stable 0.6.x release without these Xcode
+        // compile issues before bumping past 0.5.x.
         .package(url: "https://github.com/DePasqualeOrg/swift-tokenizers.git",
             .upToNextMinor(from: "0.5.0")),
         sibling(
