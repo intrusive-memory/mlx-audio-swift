@@ -1,3 +1,7 @@
+#if arch(x86_64)
+#error("mlx-audio-swift is Apple Silicon only. x86_64 builds are not supported because mlx-swift's Float16/bfloat16 dtypes require ARM64.")
+#endif
+
 import MLX
 
 extension MLXArray {
