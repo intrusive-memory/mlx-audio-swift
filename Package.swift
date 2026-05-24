@@ -47,7 +47,7 @@ let package = Package(
         // compile issues before bumping past 0.5.x.
         .package(url: "https://github.com/DePasqualeOrg/swift-tokenizers.git",
             .upToNextMinor(from: "0.5.0")),
-        .package(url: "https://github.com/intrusive-memory/SwiftAcervo.git", .upToNextMajor(from: "0.14.0")),
+        .package(url: "https://github.com/intrusive-memory/SwiftAcervo.git", .upToNextMajor(from: "0.16.0")),
         .package(url: "https://github.com/apple/swift-numerics",
             .upToNextMajor(from: "1.1.1")),
         .package(url: "https://github.com/apple/swift-collections.git",
