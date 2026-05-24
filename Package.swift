@@ -88,7 +88,7 @@ let package = Package(
         sibling(
           "SwiftAcervo",
           remote: "https://github.com/intrusive-memory/SwiftAcervo.git",
-          from: "0.14.0"),
+          from: "0.16.0"),
         .package(url: "https://github.com/apple/swift-numerics",
             .upToNextMajor(from: "1.1.1")),
         .package(url: "https://github.com/apple/swift-collections.git",
