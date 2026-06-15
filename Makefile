@@ -6,6 +6,14 @@ DESTINATION = 'platform=macOS'
 XCODEBUILD = xcodebuild
 CODE_SIGNING = CODE_SIGNING_ALLOWED=NO
 
+BINARY = mlx-audio-swift-tts
+BIN_DIR = ./bin
+DERIVED_DATA = $(HOME)/Library/Developer/Xcode/DerivedData
+APP_GROUP_ID ?= group.intrusive-memory.models
+CODESIGN_IDENTITY ?= -
+CODESIGN_FLAGS ?=
+CODESIGN_ENTITLEMENTS ?= cli.entitlements
+
 # CI-safe test suites (no model downloads).
 # Each suite here is verified zero-download (no fromPretrained / Acervo /
 # ensureComponentReady / loadModel calls). The local-only counterpart list
@@ -49,7 +57,7 @@ CI_TESTS = \
 	-only-testing:MLXAudioTests/UnigramTokenizerRoundTripTests \
 	-only-testing:MLXAudioTests/ParityFixtureLoaderSmokeTests
 
-.PHONY: help build test test-ci clean archive format lint
+.PHONY: help build test test-ci clean archive format lint install release codesign-cli
 
 help: ## Show this help message
 	@echo 'Usage: make [target]'
@@ -62,6 +70,47 @@ build: ## Build the package
 		-scheme $(SCHEME) \
 		-destination $(DESTINATION) \
 		$(CODE_SIGNING)
+
+release: ## Release build of the CLI + copy binary and Metal bundle to ./bin
+	$(XCODEBUILD) build -scheme $(SCHEME) -destination $(DESTINATION) -configuration Release $(CODE_SIGNING)
+	@$(MAKE) --no-print-directory _copy-cli CONFIG=Release
+
+install: ## Debug build of the CLI + copy binary and Metal bundle to ./bin
+	$(XCODEBUILD) build -scheme $(SCHEME) -destination $(DESTINATION) $(CODE_SIGNING)
+	@$(MAKE) --no-print-directory _copy-cli CONFIG=Debug
+
+# Internal: copy the CLI binary + MLX Metal bundle out of DerivedData. CONFIG=Debug|Release.
+_copy-cli:
+	@mkdir -p $(BIN_DIR)
+	@PRODUCT_DIR=$$(find $(DERIVED_DATA)/MLXAudio-*/Build/Products/$(CONFIG) -maxdepth 1 -name $(BINARY) -type f 2>/dev/null | xargs ls -t 2>/dev/null | head -1 | xargs dirname 2>/dev/null); \
+	if [ -z "$$PRODUCT_DIR" ]; then \
+		echo "Error: could not find $(BINARY) in DerivedData ($(CONFIG))"; exit 1; \
+	fi; \
+	cp "$$PRODUCT_DIR/$(BINARY)" $(BIN_DIR)/; \
+	if [ -d "$$PRODUCT_DIR/mlx-swift_Cmlx.bundle" ]; then \
+		rm -rf $(BIN_DIR)/mlx-swift_Cmlx.bundle; \
+		cp -R "$$PRODUCT_DIR/mlx-swift_Cmlx.bundle" $(BIN_DIR)/; \
+		echo "Installed $(BINARY) + Metal bundle to $(BIN_DIR)/ ($(CONFIG))"; \
+	else \
+		echo "Installed $(BINARY) to $(BIN_DIR)/ ($(CONFIG); WARNING: no Metal bundle found)"; \
+	fi
+
+# ── App Group code-signing ────────────────────────────
+# Sign the CLI with the com.apple.security.application-groups entitlement so the
+# group ID is embedded in the binary and SwiftAcervo resolves the shared models
+# container (~/Library/Group Containers/group.intrusive-memory.models/) WITHOUT
+# requiring ACERVO_APP_GROUP_ID in the environment. Container access is plain
+# POSIX (same-user, mode 700); the entitlement only supplies the group
+# identifier at runtime via SecTaskCopyValueForEntitlement.
+#
+# Default identity is ad-hoc (-). For a distributable build, override with a
+# Developer ID by certificate SHA-1 (names collide in the keychain):
+#   make install codesign-cli CODESIGN_IDENTITY=<sha1>
+codesign-cli: ## Sign the CLI with the App Group entitlement (run after install/release)
+	@test -f "$(BIN_DIR)/$(BINARY)" || { echo "Error: $(BIN_DIR)/$(BINARY) not found — run 'make install' or 'make release' first."; exit 1; }
+	@codesign --force --sign "$(CODESIGN_IDENTITY)" --entitlements "$(CODESIGN_ENTITLEMENTS)" $(CODESIGN_FLAGS) "$(BIN_DIR)/$(BINARY)"
+	@echo "Signed $(BIN_DIR)/$(BINARY) (identity: $(CODESIGN_IDENTITY), group: $(APP_GROUP_ID))"
+	@codesign -d --entitlements - "$(BIN_DIR)/$(BINARY)" 2>/dev/null | grep -A1 "application-groups" || true
 
 test: test-ci ## Run CI-safe tests (no model downloads)
 
