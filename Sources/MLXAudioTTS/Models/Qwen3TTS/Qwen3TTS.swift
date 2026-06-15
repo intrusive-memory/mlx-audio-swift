@@ -28,6 +28,31 @@ public final class Qwen3TTSModel: Module, SpeechGenerationModel, @unchecked Send
     /// The output audio sample rate in Hz (typically 24000).
     public var sampleRate: Int { config.sampleRate }
 
+    /// The language keys this loaded model can condition generation on.
+    ///
+    /// These are the exact keys of the model's `codec_language_id` map (e.g.
+    /// `"english"`, `"spanish"`, `"beijing_dialect"`). A `language:` value passed
+    /// to ``generate(text:voice:refAudio:refText:language:instruct:generationParameters:)``
+    /// that is **not** in this set — and is not `"auto"` — is silently ignored:
+    /// generation proceeds with no language token, producing un-conditioned
+    /// output. Callers can check membership up front to detect that fall-through
+    /// before it happens. Empty when the model config carries no language map.
+    public var supportedLanguageKeys: Set<String> {
+        guard let map = config.talkerConfig?.codecLanguageId else { return [] }
+        return Set(map.keys)
+    }
+
+    /// Whether `language` is a key the model's `codec_language_id` map recognizes.
+    ///
+    /// Mirrors the exact lookup performed in `generate` (`langMap[language.lowercased()]`):
+    /// `"auto"` returns `true` (a valid request meaning "emit no language token"),
+    /// and any other value is matched case-insensitively against the map keys.
+    public func recognizesLanguage(_ language: String) -> Bool {
+        let lowered = language.lowercased()
+        if lowered == "auto" { return true }
+        return config.talkerConfig?.codecLanguageId?[lowered] != nil
+    }
+
     // MARK: - Telemetry (OPERATION SILENT STETHOSCOPE — Sortie 3)
 
     /// Attached telemetry reporter. `nil` by default — zero runtime cost
