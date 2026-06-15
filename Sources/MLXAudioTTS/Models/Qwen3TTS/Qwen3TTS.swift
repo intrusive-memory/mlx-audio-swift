@@ -191,6 +191,45 @@ public final class Qwen3TTSModel: Module, SpeechGenerationModel, @unchecked Send
 
     // MARK: - ICL Input Preparation
 
+    /// Emits a `[lang]` visibility line describing whether this generation will be
+    /// conditioned on a language token, at the exact point the codec prefill is built.
+    ///
+    /// `resolvedId == nil` means no language token is injected (the `nothink` branch)
+    /// and the model generates **un-conditioned on language** — surfaced so a
+    /// mis-passed or unsupported language is caught at the model boundary rather than
+    /// showing up as silently wrong-accent audio.
+    ///
+    /// Gated at `Telemetry.level >= .operations` (set via the `MLXAUDIO_TELEMETRY`
+    /// env var; the compile-time ceiling is `.lifecycle` in release builds and
+    /// `.verbose` under `MLXAUDIO_TELEMETRY_FULL`), so it is silent by default.
+    ///
+    /// - Parameters:
+    ///   - requested: The language string handed to the prepare step (pre-lookup).
+    ///   - resolvedId: The `codec_language_id` token it resolved to, or nil.
+    ///   - talkerConfig: The loaded talker config (for the accepted-key list).
+    ///   - site: The call site, so multiple generation paths are distinguishable.
+    func logLanguageConditioning(
+        requested: String,
+        resolvedId: Int?,
+        talkerConfig: Qwen3TTSTalkerConfig,
+        site: String
+    ) {
+        guard Telemetry.level >= .operations else { return }
+        let lang = requested.lowercased()
+        let line: String
+        if lang == "auto" {
+            line = "[lang] \(site): requested=\"auto\" → no language token (by request); prefill=nothink"
+        } else if let id = resolvedId {
+            line = "[lang] \(site): requested=\"\(lang)\" recognized=true langId=\(id) prefill=think"
+        } else {
+            let accepted = talkerConfig.codecLanguageId?.keys.sorted().joined(separator: ", ") ?? "(none)"
+            line =
+                "[lang] \(site): requested=\"\(lang)\" recognized=false prefill=nothink "
+                + "(UN-CONDITIONED; model accepts: \(accepted))"
+        }
+        FileHandle.standardError.write(Data((line + "\n").utf8))
+    }
+
     /// Prepares input embeddings for in-context learning (voice cloning) generation.
     ///
     /// This is the Swift port of `_prepare_icl_generation_inputs()` from the Python
@@ -333,6 +372,9 @@ public final class Qwen3TTSModel: Module, SpeechGenerationModel, @unchecked Send
         if language.lowercased() != "auto", let langMap = talkerConfig.codecLanguageId {
             languageId = langMap[language.lowercased()]
         }
+        logLanguageConditioning(
+            requested: language, resolvedId: languageId, talkerConfig: talkerConfig,
+            site: "prepareICLInputs")
 
         // --- Step 8: Build codec prefix ---
         // Sequence: [think/nothink, thinkBos, langId?, thinkEos]
@@ -1515,6 +1557,9 @@ public final class Qwen3TTSModel: Module, SpeechGenerationModel, @unchecked Send
         if effectiveLanguage.lowercased() != "auto", let langMap = talkerConfig.codecLanguageId {
             languageId = langMap[effectiveLanguage.lowercased()]
         }
+        logLanguageConditioning(
+            requested: effectiveLanguage, resolvedId: languageId, talkerConfig: talkerConfig,
+            site: "prepareBaseInputs")
 
         // --- Build codec prefix ---
         // Sequence: [think/nothink, thinkBos, langId?, thinkEos]
@@ -1632,6 +1677,9 @@ public final class Qwen3TTSModel: Module, SpeechGenerationModel, @unchecked Send
         if language.lowercased() != "auto", let langMap = talkerConfig.codecLanguageId {
             languageId = langMap[language.lowercased()]
         }
+        logLanguageConditioning(
+            requested: language, resolvedId: languageId, talkerConfig: talkerConfig,
+            site: "prepareGenerationInputs")
 
         // Build codec prefix
         var codecPrefill: [Int32]
