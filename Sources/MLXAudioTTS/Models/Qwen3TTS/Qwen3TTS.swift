@@ -510,6 +510,40 @@ public final class Qwen3TTSModel: Module, SpeechGenerationModel, @unchecked Send
         instruct: String? = nil,
         generationParameters: GenerateParameters
     ) async throws -> MLXArray {
+        try await generate(
+            text: text, voice: voice, refAudio: refAudio, refText: refText,
+            language: language, instruct: instruct,
+            breathOffsets: [],
+            generationParameters: generationParameters
+        )
+    }
+
+    /// Synthesises speech with optional breath-aware chunking.
+    ///
+    /// - Parameters:
+    ///   - text: The text to synthesise.
+    ///   - voice: Voice description (VoiceDesign) or speaker name (Base/CustomVoice).
+    ///   - refAudio: Reference audio waveform for ICL voice cloning (optional).
+    ///   - refText: Transcript of the reference audio (optional).
+    ///   - language: Language code (e.g. "en", "chinese", "auto"). Defaults to "auto".
+    ///   - instruct: Delivery instruction (e.g., "speak slowly", "speak in a whisper").
+    ///     For VoiceDesign models, this parameter is ignored; use `voice` instead.
+    ///   - breathOffsets: Unicode-scalar indices into `text` at which to insert silent
+    ///     breath seams; each index becomes a cut point that splits the utterance into
+    ///     independently synthesised sub-utterances whose waveforms are concatenated in
+    ///     order. Empty (default) disables chunking and produces a single waveform.
+    ///   - generationParameters: Sampling parameters (temperature, topP, etc.).
+    /// - Returns: Generated audio waveform as a 1-D MLXArray.
+    public func generate(
+        text: String,
+        voice: String?,
+        refAudio: MLXArray? = nil,
+        refText: String? = nil,
+        language: String? = nil,
+        instruct: String? = nil,
+        breathOffsets: [Int] = [],
+        generationParameters: GenerateParameters
+    ) async throws -> MLXArray {
         let modelName = "Qwen3TTS"
         await emit(.ttsGenerationStart(model: modelName, textLength: text.count, voiceType: voice))
         let generateStart = Date()
@@ -525,6 +559,7 @@ public final class Qwen3TTSModel: Module, SpeechGenerationModel, @unchecked Send
                     try await self._generateImpl(
                         text: text, voice: voice, refAudio: refAudio, refText: refText,
                         language: language, instruct: instruct,
+                        breathOffsets: breathOffsets,
                         generationParameters: generationParameters
                     )
                 }
@@ -542,6 +577,7 @@ public final class Qwen3TTSModel: Module, SpeechGenerationModel, @unchecked Send
             let audio = try await _generateImpl(
                 text: text, voice: voice, refAudio: refAudio, refText: refText,
                 language: language, instruct: instruct,
+                breathOffsets: breathOffsets,
                 generationParameters: generationParameters
             )
             let durationSeconds = Date().timeIntervalSince(generateStart)
@@ -563,7 +599,7 @@ public final class Qwen3TTSModel: Module, SpeechGenerationModel, @unchecked Send
         }
     }
 
-    private func _generateImpl(
+    private func _generateSingle(
         text: String,
         voice: String?,
         refAudio: MLXArray?,
@@ -637,6 +673,36 @@ public final class Qwen3TTSModel: Module, SpeechGenerationModel, @unchecked Send
                 maxTokens: maxTokens
             )
         }
+    }
+
+    private func _generateImpl(
+        text: String,
+        voice: String?,
+        refAudio: MLXArray?,
+        refText: String?,
+        language: String?,
+        instruct: String?,
+        breathOffsets: [Int],
+        generationParameters: GenerateParameters
+    ) async throws -> MLXArray {
+        if breathOffsets.isEmpty {
+            return try await _generateSingle(
+                text: text, voice: voice, refAudio: refAudio, refText: refText,
+                language: language, instruct: instruct,
+                generationParameters: generationParameters
+            )
+        }
+        let segments = splitTextAtBreaths(text, offsets: breathOffsets)
+        var chunks: [MLXArray] = []
+        for segment in segments {
+            let chunk = try await _generateSingle(
+                text: segment, voice: voice, refAudio: refAudio, refText: refText,
+                language: language, instruct: instruct,
+                generationParameters: generationParameters
+            )
+            chunks.append(chunk)
+        }
+        return concatenateChunks(chunks)
     }
 
     /// Generate audio from text as an asynchronous stream of ``AudioGeneration`` events.

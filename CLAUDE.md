@@ -76,6 +76,7 @@ Read and follow all instructions in [AGENTS.md](AGENTS.md) before starting any t
     -only-testing:MLXAudioTests/AudioBufferCacheTelemetryTests \
     -only-testing:MLXAudioTests/EndToEndTelemetryTests \
     -only-testing:MLXAudioTests/HotLoopGuardTests \
+    -only-testing:MLXAudioTests/Qwen3TTSBreathSplitTests \
     CODE_SIGNING_ALLOWED=NO
   ```
 
@@ -108,6 +109,11 @@ nightly workflow (`.github/workflows/nightly-tests.yaml`, Sortie 9).
 | `TelemetryLeakDetectionMarvisTTSTests` | Marvis TTS (CSM / Sesame) | leak detection pattern (Sortie 9). Asserts `MarvisTTS.Model`, `MarvisTTS.KVCache`, `Mimi.Model`, and `Mimi.Tokenizer` live counts return to baseline. Requires `MLXAUDIO_NIGHTLY_RUN=1`. |
 | `TelemetryLeakDetectionQwen3ASRTests` | Qwen3-ASR | leak detection pattern (Sortie 9). Asserts `Qwen3ASR.Model`, `Qwen3ASR.KVCache`, and `Qwen3ASR.Aligner` live counts return to baseline. Requires `MLXAUDIO_NIGHTLY_RUN=1`. |
 | `TelemetryLeakDetectionGLMASRTests` | GLM-ASR | leak detection pattern (Sortie 9). Asserts `GLMASR.Model` and `GLMASR.KVCache` live counts return to baseline. Requires `MLXAUDIO_NIGHTLY_RUN=1`. |
+| `Qwen3TTSBreathGenerateTests` | Qwen3-TTS | breathOffsets seam test (Sortie 5). Test A: asserts `generate(..., breathOffsets:)` total sample count equals sum of per-chunk sample counts (direct concatenation is lossless). Test B: asserts empty `breathOffsets` is byte-identical to calling `generate` without the parameter (seed=42, greedy). Requires `MLXAUDIO_NIGHTLY_RUN=1`. |
+
+### `breathOffsets` parameter
+
+The `breathOffsets` parameter accepted by `Qwen3TTSModel.generate(text:voice:refAudio:refText:language:instruct:breathOffsets:generationParameters:)` is a list of unicode-scalar indices into `text` that split the utterance into independently-synthesised, concatenated sub-utterances (silent breath seams). Each index becomes a cut point: the text is partitioned at those positions, each segment is synthesised in a separate autoregressive pass, and the resulting waveforms are concatenated in order. Passing an empty array (or calling the overload without the parameter) disables chunking and produces a single waveform — behaviour is identical to the pre-breathOffsets API.
 
 To run a single local-only suite:
   ```bash
