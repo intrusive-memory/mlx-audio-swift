@@ -76,6 +76,7 @@ Read and follow all instructions in [AGENTS.md](AGENTS.md) before starting any t
     -only-testing:MLXAudioTests/AudioBufferCacheTelemetryTests \
     -only-testing:MLXAudioTests/EndToEndTelemetryTests \
     -only-testing:MLXAudioTests/HotLoopGuardTests \
+    -only-testing:MLXAudioTests/Qwen3TTSBreathSplitTests \
     CODE_SIGNING_ALLOWED=NO
   ```
 
