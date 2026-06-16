@@ -6,7 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-06-16
+
 ### Added
+
+- **Qwen3-TTS breath phrasing seams (`breathOffsets`)**: `Qwen3TTSModel.generate(...)` now accepts an optional `breathOffsets` array of unicode-scalar indices into `text`. Each index becomes a cut point that partitions the utterance into independently-synthesised, concatenated sub-utterances (silent breath seams). Passing an empty array (or calling the overload without the parameter) disables chunking and is byte-identical to the pre-`breathOffsets` API.
+- **Gated `[lang]` visibility at the codec-prefill language boundary**: the `[lang]` token is now surfaced at the codec-prefill language boundary under explicit gating, improving language-switch handling during Qwen3-TTS synthesis.
 
 - **Audio Component Registry (P1 Models)**: SNAC and Mimi audio codecs now register with SwiftAcervo Component Registry at module initialization via `ComponentDescriptor`. This enables:
   - Declarative model metadata (file lists, memory requirements, codec parameters)

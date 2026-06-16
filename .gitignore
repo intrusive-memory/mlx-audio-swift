@@ -24,3 +24,7 @@ xcuserdata/*
 *.xcuserdatad/xcdebugger/Breakpoints_v2.xcbkptlist
 
 Package.resolved
+
+# graphify codemap scratch (no portable map committed yet — needs an LLM API key
+# for semantic extraction of doc files; see /codemap skill)
+graphify-out/
