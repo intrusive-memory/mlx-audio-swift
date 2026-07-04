@@ -76,15 +76,17 @@ let package = Package(
             .upToNextMajor(from: "0.31.3")),
         .package(url: "https://github.com/ml-explore/mlx-swift-lm.git",
             .upToNextMajor(from: "3.31.3")),
-        // swift-tokenizers 0.5.0+ is Swift-only; no traits needed.
-        // Pinned to 0.5.x — 0.6.0 swaps the pure-Swift implementation for a
-        // UniFFI-based Rust artifactbundle that has known Xcode module-map /
-        // compile issues (the 0.6.2 tag ships an explicit "Temporary fix for
-        // Xcode builds" commit, 37f999a, the maintainer flagged as a possible
-        // Xcode bug). Wait for a stable 0.6.x release without these Xcode
-        // compile issues before bumping past 0.5.x.
+        // swift-tokenizers ships the Hugging Face Rust `tokenizers` crate as a
+        // binary backend (an SE-0482 `staticLibrary` artifactbundle since
+        // 0.7.x; an XCFramework in 0.5.x). 0.6.x briefly had an Xcode module-map
+        // bug (the 0.6.2 "Temporary fix for Xcode builds" commit 37f999a) which
+        // pinned us to 0.5.x; 0.7.x's artifactbundle resolves and compiles
+        // cleanly under xcodebuild, so that blocker is resolved. 0.6.0 also
+        // converted the `Tokenizer` protocol to typed throws
+        // (`throws(TokenizerError)`); this repo adopts and propagates that (see
+        // docs/TODO_TOKENIZERS_0_6_MIGRATION.md). Requires Swift 6.2 / Xcode 26.
         .package(url: "https://github.com/DePasqualeOrg/swift-tokenizers.git",
-            .upToNextMinor(from: "0.5.0")),
+            .upToNextMinor(from: "0.7.1")),
         sibling(
           "SwiftAcervo",
           remote: "https://github.com/intrusive-memory/SwiftAcervo.git",

@@ -398,7 +398,9 @@ public class Qwen3Model: Module, KVCacheDimensionProvider, SpeechGenerationModel
         voice: String? = nil,
         refAudio: MLXArray? = nil,
         refText: String? = nil
-    ) -> (MLXArray, MLXArray) {
+    ) throws -> (MLXArray, MLXArray) {
+
+        guard let tokenizer else { throw AudioGenerationError.tokenizerNotLoaded }
 
         var refAudioCodes: [Int32]? = nil
         var refTranscriptIds: [Int32]? = nil
@@ -413,7 +415,7 @@ public class Qwen3Model: Module, KVCacheDimensionProvider, SpeechGenerationModel
             let codes = encodeAudioToCodes(audio: refAudio, snacModel: snacModel)
             let codesArray = (codes + audioTokensStart).asArray(Int32.self)
             refAudioCodes = codesArray
-            refTranscriptIds = tokenizer!.encode(text: refText).map { Int32($0) }
+            refTranscriptIds = try tokenizer.encode(text: refText).map { Int32($0) }
         }
 
         // Apply voice prefix if provided
@@ -425,8 +427,8 @@ public class Qwen3Model: Module, KVCacheDimensionProvider, SpeechGenerationModel
         }
 
         // Encode all prompts to CPU arrays first (avoid multiple MLXArray creations)
-        let encodedPrompts: [[Int32]] = modifiedPrompts.map { prompt in
-            tokenizer!.encode(text: prompt).map { Int32($0) }
+        let encodedPrompts: [[Int32]] = try modifiedPrompts.map { prompt in
+            try tokenizer.encode(text: prompt).map { Int32($0) }
         }
 
         // Find max length for padding
@@ -613,7 +615,7 @@ public class Qwen3Model: Module, KVCacheDimensionProvider, SpeechGenerationModel
         let prompt = text.replacingOccurrences(of: "\\n", with: "\n")
             .replacingOccurrences(of: "\\t", with: "\t")
 
-        let (inputIds, _) = prepareInputIds(
+        let (inputIds, _) = try prepareInputIds(
             prompts: [prompt],
             voice: voice,
             refAudio: refAudio,
@@ -743,7 +745,7 @@ public class Qwen3Model: Module, KVCacheDimensionProvider, SpeechGenerationModel
                 let prompt = text.replacingOccurrences(of: "\\n", with: "\n")
                     .replacingOccurrences(of: "\\t", with: "\t")
                 
-                let (inputIds, _) = self.prepareInputIds(
+                let (inputIds, _) = try self.prepareInputIds(
                     prompts: [prompt],
                     voice: voice,
                     refAudio: refAudio,

@@ -963,9 +963,9 @@ public class Qwen3ASRModel: Module {
 
     // MARK: - Prompt Building
 
-    public func buildPrompt(numAudioTokens: Int, language: String = "English") -> MLXArray {
+    public func buildPrompt(numAudioTokens: Int, language: String = "English") throws -> MLXArray {
         guard let tokenizer = tokenizer else {
-            fatalError("Tokenizer not loaded")
+            throw AudioGenerationError.tokenizerNotLoaded
         }
 
         let supported = config.supportLanguages
@@ -978,7 +978,7 @@ public class Qwen3ASRModel: Module {
             + "<|audio_end|><|im_end|>\n"
             + "<|im_start|>assistant\nlanguage \(langName)<asr_text>"
 
-        let tokenIds = tokenizer.encode(text: prompt)
+        let tokenIds = try tokenizer.encode(text: prompt)
         return MLXArray(tokenIds.map { Int32($0) }).expandedDimensions(axis: 0)
     }
 
@@ -999,15 +999,15 @@ public class Qwen3ASRModel: Module {
         maxTokens: Int,
         temperature: Float,
         language: String
-    ) -> (text: String, promptTokens: Int, generationTokens: Int) {
+    ) throws -> (text: String, promptTokens: Int, generationTokens: Int) {
         guard let tokenizer = tokenizer else {
-            fatalError("Tokenizer not loaded")
+            throw AudioGenerationError.tokenizerNotLoaded
         }
 
         let eosTokenIds = [151645, 151643]
 
         let (inputFeatures, featureAttentionMask, numAudioTokens) = preprocessAudio(audio)
-        let inputIds = buildPrompt(numAudioTokens: numAudioTokens, language: language)
+        let inputIds = try buildPrompt(numAudioTokens: numAudioTokens, language: language)
         let promptTokenCount = inputIds.dim(1)
 
         let audioFeatures = getAudioFeatures(inputFeatures, featureAttentionMask: featureAttentionMask)
@@ -1057,7 +1057,7 @@ public class Qwen3ASRModel: Module {
             eval(logits)
         }
 
-        let text = tokenizer.decode(tokenIds: generatedTokens)
+        let text = try tokenizer.decode(tokenIds: generatedTokens)
         return (text.trimmingCharacters(in: .whitespacesAndNewlines), promptTokenCount, generatedTokens.count)
     }
 
@@ -1071,14 +1071,14 @@ public class Qwen3ASRModel: Module {
         maxTokens: Int,
         temperature: Float,
         language: String
-    ) -> (text: String, promptTokens: Int, generationTokens: Int) {
+    ) throws -> (text: String, promptTokens: Int, generationTokens: Int) {
         guard let tokenizer = tokenizer else {
-            fatalError("Tokenizer not loaded")
+            throw AudioGenerationError.tokenizerNotLoaded
         }
 
         let eosTokenIds = [151645, 151643]
 
-        let inputIds = buildPrompt(numAudioTokens: numAudioTokens, language: language)
+        let inputIds = try buildPrompt(numAudioTokens: numAudioTokens, language: language)
         let promptTokenCount = inputIds.dim(1)
 
         let embeds = model.embedTokens(inputIds)
@@ -1125,7 +1125,7 @@ public class Qwen3ASRModel: Module {
             eval(logits)
         }
 
-        let text = tokenizer.decode(tokenIds: generatedTokens)
+        let text = try tokenizer.decode(tokenIds: generatedTokens)
         return (
             text.trimmingCharacters(in: .whitespacesAndNewlines),
             promptTokenCount,
@@ -1158,7 +1158,7 @@ public class Qwen3ASRModel: Module {
         chunkDuration: Float = 1200.0,
         minChunkDuration: Float = 1.0,
         maxBatchSize: Int = Qwen3ASRModel.defaultMaxBatchSize
-    ) -> STTOutput {
+    ) throws -> STTOutput {
         // Emit sttTranscriptionStart — fire-and-forget because generate() is synchronous.
         // Capture the Sendable reporter (not self) so the detached Task never
         // touches the non-Sendable model.
@@ -1179,12 +1179,12 @@ public class Qwen3ASRModel: Module {
         // S11: Qwen3ASR.generate interval (Level 2 = .operations).
         #if MLXAUDIO_TELEMETRY_FULL
         if Telemetry.level >= .operations {
-            let result = Telemetry.emitInterval(
+            let result = try Telemetry.emitInterval(
                 name: "Qwen3ASR.generate",
                 family: .qwen3ASR,
                 message: language
             ) {
-                self._generateImpl(
+                try self._generateImpl(
                     audio: audio, maxTokens: maxTokens, temperature: temperature,
                     language: language, chunkDuration: chunkDuration,
                     minChunkDuration: minChunkDuration, maxBatchSize: maxBatchSize
@@ -1205,7 +1205,7 @@ public class Qwen3ASRModel: Module {
         }
         #endif
 
-        let result = _generateImpl(
+        let result = try _generateImpl(
             audio: audio, maxTokens: maxTokens, temperature: temperature,
             language: language, chunkDuration: chunkDuration,
             minChunkDuration: minChunkDuration, maxBatchSize: maxBatchSize
@@ -1234,7 +1234,7 @@ public class Qwen3ASRModel: Module {
         chunkDuration: Float,
         minChunkDuration: Float,
         maxBatchSize: Int
-    ) -> STTOutput {
+    ) throws -> STTOutput {
         let startTime = Date()
 
         // Split audio into chunks
@@ -1256,7 +1256,7 @@ public class Qwen3ASRModel: Module {
             let (chunkAudio, offsetSec) = chunks[0]
             let actualChunkDuration = Float(chunkAudio.dim(0)) / Float(sampleRate)
 
-            let result = generateSingleChunk(
+            let result = try generateSingleChunk(
                 audio: chunkAudio,
                 maxTokens: remainingTokens,
                 temperature: temperature,
@@ -1293,7 +1293,7 @@ public class Qwen3ASRModel: Module {
                     let actualChunkDuration = Float(chunkAudio.dim(0)) / Float(sampleRate)
                     let encoded = encodedChunks[batchOffset]
 
-                    let result = generateSingleChunkFromAudioFeatures(
+                    let result = try generateSingleChunkFromAudioFeatures(
                         audioFeatures: encoded.audioFeatures,
                         numAudioTokens: encoded.numAudioTokens,
                         maxTokens: remainingTokens,
@@ -1411,8 +1411,8 @@ public class Qwen3ASRModel: Module {
                 func streamDecodeFromFeatures(
                     audioFeatures: MLXArray,
                     numAudioTokens: Int
-                ) {
-                    let inputIds = self.buildPrompt(numAudioTokens: numAudioTokens, language: language)
+                ) throws {
+                    let inputIds = try self.buildPrompt(numAudioTokens: numAudioTokens, language: language)
                     let promptTokenCount = inputIds.dim(1)
                     totalPromptTokens += promptTokenCount
 
@@ -1447,7 +1447,7 @@ public class Qwen3ASRModel: Module {
                         chunkTokens.append(nextToken)
                         allGeneratedTokens.append(nextToken)
 
-                        let tokenText = tokenizer.decode(tokenIds: [nextToken])
+                        let tokenText = try tokenizer.decode(tokenIds: [nextToken])
                         continuation.yield(.token(tokenText))
 
                         let nextTokenArray = MLXArray([Int32(nextToken)]).expandedDimensions(axis: 0)
@@ -1472,7 +1472,7 @@ public class Qwen3ASRModel: Module {
                     eval(audioFeatures)
 
                     currentPhase = "decode"
-                    streamDecodeFromFeatures(
+                    try streamDecodeFromFeatures(
                         audioFeatures: audioFeatures,
                         numAudioTokens: numAudioTokens
                     )
@@ -1496,7 +1496,7 @@ public class Qwen3ASRModel: Module {
                             if remainingTokens <= 0 { break }
 
                             let encoded = encodedChunks[batchOffset]
-                            streamDecodeFromFeatures(
+                            try streamDecodeFromFeatures(
                                 audioFeatures: encoded.audioFeatures,
                                 numAudioTokens: encoded.numAudioTokens
                             )
@@ -1524,7 +1524,7 @@ public class Qwen3ASRModel: Module {
                 continuation.yield(.info(info))
 
                 // Emit final result
-                let text = tokenizer.decode(tokenIds: allGeneratedTokens)
+                let text = try tokenizer.decode(tokenIds: allGeneratedTokens)
                 let output = STTOutput(
                     text: text.trimmingCharacters(in: .whitespacesAndNewlines),
                     promptTokens: totalPromptTokens,
