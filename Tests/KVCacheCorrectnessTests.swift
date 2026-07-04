@@ -106,7 +106,7 @@ struct KVCacheCorrectnessTests {
 
         // Prepare a short, fixed prompt. Voice prefix "tara" matches the standard
         // Orpheus voice used in other tests.
-        let (inputIds, _) = model.prepareInputIds(
+        let (inputIds, _) = try model.prepareInputIds(
             prompts: ["Hello."],
             voice: "tara"
         )
@@ -189,7 +189,7 @@ struct KVCacheCorrectnessTests {
             model.preprocessAudio(silentAudio)
 
         // Build the prompt token IDs (contains <|audio_pad|> placeholders).
-        let inputIds = model.buildPrompt(numAudioTokens: numAudioTokens, language: "English")
+        let inputIds = try model.buildPrompt(numAudioTokens: numAudioTokens, language: "English")
 
         // ── Path 1: Single-shot forward (no cache) ──────────────────────────
         // Pass inputFeatures so the model merges audio internally on the first call.

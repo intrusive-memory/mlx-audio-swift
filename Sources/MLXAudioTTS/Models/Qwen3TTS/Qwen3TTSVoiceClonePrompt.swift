@@ -255,7 +255,7 @@ extension Qwen3TTSModel {
         )
 
         // Step 2: Cap max tokens based on text length
-        let targetTokenCount = tokenizer.encode(text: text).count
+        let targetTokenCount = try tokenizer.encode(text: text).count
         let effectiveMaxTokens = min(maxTokens, max(200, targetTokenCount * 12))
 
         // Step 2.5: Adaptive temperature scaling for long generations

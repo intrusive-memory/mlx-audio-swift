@@ -1,11 +1,17 @@
-# swift-tokenizers 0.5.0 → 0.6.0 Migration
+---
+type: doc
+---
 
-**Status:** Not started. swift-tokenizers is currently pinned in `Package.swift` to `.upToNextMinor(from: "0.5.0")` (resolves to 0.5.0). Bump to `.upToNextMinor(from: "0.6.0")` after this checklist is complete.
+# swift-tokenizers 0.5.0 → 0.7.1 Migration
 
-**Versioning impact:** This migration is a **source-breaking change for consumers of mlx-audio-swift** (see "Migration philosophy" below). It must ship as the next minor bump (`0.9.0`), not a patch. Do not bundle it into a `0.8.x` patch release.
+**Status:** ✅ **DONE.** `Package.swift` is pinned to `.upToNextMinor(from: "0.7.1")` and the full typed-throws propagation below has been applied. The CI-safe suite (316 tests / 37 suites) is green.
 
-**Owner:** TBD
-**Last updated:** 2026-05-10
+**Why 0.7.1 and not 0.6.x:** The original blocker for leaving 0.5.x was an Xcode module-map bug in the 0.6.x XCFramework (the 0.6.2 "Temporary fix for Xcode builds" commit 37f999a). 0.7.x replaced the XCFramework with an SE-0482 `staticLibrary` artifactbundle, which resolves and compiles cleanly under `xcodebuild` — verified empirically. So we skipped 0.6.x and went straight to 0.7.1. (Both 0.5.x and 0.7.x are Rust-backed; the old pin comment claiming "0.5.0 is Swift-only" was incorrect.) Requires Swift 6.2 / Xcode 26.
+
+**Versioning impact:** This is a **source-breaking change for consumers of mlx-audio-swift** (see "Migration philosophy" below). The migration missed the 0.9.0 train (0.9.0 shipped the breath-phrasing feature without it), so it ships as **0.10.0**, not 0.9.0. `MLXAudio.version` is now `0.10.0`.
+
+**Owner:** Tom Stovall
+**Last updated:** 2026-07-04
 
 ---
 
@@ -297,19 +303,22 @@ Throwing functions in mlx-audio-swift can either let `TokenizerError` propagate 
    The expected output is empty. Any hit must be justified inline with a comment explaining the recovery, or removed.
 6. **Public-API audit.** Diff the public surface of `MLXAudioTTS` and `MLXAudioSTT` between `0.8.x` and the migration branch. Every newly-`throws` public function must appear in the `0.9.0` release notes under "Breaking changes", with a one-liner showing the consumer-side `try` addition.
 
-## Release notes (skeleton for 0.9.0)
+## Release notes (skeleton for 0.10.0)
 
 When shipping, the release notes should lead with this — not bury it:
 
 > ### Breaking: tokenizer-using APIs now throw
 >
-> mlx-audio-swift 0.9.0 adopts swift-tokenizers 0.6.0, which converts the tokenizer protocol to a typed-throws API. Public functions in `MLXAudioTTS` and `MLXAudioSTT` that internally tokenize now propagate `TokenizerError` rather than swallowing it. This is intentional: silent tokenizer failure produces silent garbage downstream, and we'd rather you see the error.
+> mlx-audio-swift 0.10.0 adopts swift-tokenizers 0.7.1, which converts the tokenizer protocol to a typed-throws API (`throws(TokenizerError)`). Public functions in `MLXAudioTTS` and `MLXAudioSTT` that internally tokenize now propagate the error rather than swallowing it (or trapping via `fatalError` / force-unwrap). This is intentional: silent tokenizer failure produces silent garbage downstream, and we'd rather you see the error.
 >
-> **Migration:** add `try` (and `do/catch` or rethrowing) at every call site of:
+> **Migration:** add `try` (and `do/catch` or rethrowing) at every call site of the now-`throws` public APIs:
+> - `Qwen3ASRModel.generate(audio:maxTokens:temperature:language:chunkDuration:minChunkDuration:maxBatchSize:)`
+> - `Qwen3ASRModel.buildPrompt(numAudioTokens:language:)`
 > - `Qwen3ForcedAligner.generate(audio:text:language:)`
-> - `Qwen3TTS.Model.prepareInputIds(...)`
-> - `LlamaTTS.Model.prepareInputIds(...)`
-> - `Soprano.tokenize(_:language:)`
-> - (full list in [docs/TODO_TOKENIZERS_0_6_MIGRATION.md](docs/TODO_TOKENIZERS_0_6_MIGRATION.md))
+> - `GLMASRModel.generate(audio:maxTokens:temperature:topP:topK:verbose:)`
+> - `Qwen3.Model.prepareInputIds(prompts:voice:refAudio:refText:)`
+> - `LlamaTTS.Model.prepareInputIds(prompts:voice:refAudio:refText:)`
+>
+> Previously-trapping guards (`fatalError("Tokenizer not loaded")`, `tokenizer!`, and a `MLXArray.zeros` sentinel in Qwen3TTS voice-design) now throw `AudioGenerationError.tokenizerNotLoaded` / `.modelNotInitialized` instead.
 
-When this file is fully checked off, ship the `Package.swift` bump and the propagation work together as `0.9.0`. The `Package.swift` change is one line; the breaking-change communication is everything around it.
+The `Package.swift` change is one line; the breaking-change communication is everything around it. Ship the pin bump and the propagation work together as `0.10.0`.

@@ -271,13 +271,13 @@ private struct GenerationContext {
     }
 
     /// Decode token to text.
-    func decode(_ token: Int) -> String {
-        tokenizer.decode(tokenIds: [token])
+    func decode(_ token: Int) throws -> String {
+        try tokenizer.decode(tokenIds: [token])
     }
 
     /// Decode tokens to text.
-    func decode(_ tokens: [Int]) -> String {
-        tokenizer.decode(tokenIds: tokens)
+    func decode(_ tokens: [Int]) throws -> String {
+        try tokenizer.decode(tokenIds: tokens)
     }
 }
 
@@ -404,7 +404,7 @@ public class GLMASRModel: Module {
         topP: Float = 0.95,
         topK: Int = 0,
         verbose: Bool = false
-    ) -> STTOutput {
+    ) throws -> STTOutput {
         // Emit sttTranscriptionStart — fire-and-forget because generate() is synchronous.
         // Capture the Sendable reporter (not self) so the detached Task never
         // touches the non-Sendable model.
@@ -424,12 +424,12 @@ public class GLMASRModel: Module {
         // S11: GLMASR.generate interval (Level 2 = .operations).
         #if MLXAUDIO_TELEMETRY_FULL
         if Telemetry.level >= .operations {
-            let result = Telemetry.emitInterval(
+            let result = try Telemetry.emitInterval(
                 name: "GLMASR.generate",
                 family: .glmASR,
                 message: ""
             ) {
-                self._glmGenerateImpl(
+                try self._glmGenerateImpl(
                     audio: audio, maxTokens: maxTokens, temperature: temperature,
                     topP: topP, topK: topK, verbose: verbose
                 )
@@ -449,7 +449,7 @@ public class GLMASRModel: Module {
         }
         #endif
 
-        let result = _glmGenerateImpl(
+        let result = try _glmGenerateImpl(
             audio: audio, maxTokens: maxTokens, temperature: temperature,
             topP: topP, topK: topK, verbose: verbose
         )
@@ -476,15 +476,15 @@ public class GLMASRModel: Module {
         topP: Float,
         topK: Int,
         verbose: Bool
-    ) -> STTOutput {
+    ) throws -> STTOutput {
         guard let tokenizer = tokenizer else {
-            fatalError("Tokenizer not loaded")
+            throw AudioGenerationError.tokenizerNotLoaded
         }
 
         let startTime = Date()
 
         // Prepare for generation
-        let (context, promptTokenCount) = prepareGeneration(audio: audio, tokenizer: tokenizer)
+        let (context, promptTokenCount) = try prepareGeneration(audio: audio, tokenizer: tokenizer)
         var ctx = context
 
         // Generate tokens
@@ -501,7 +501,7 @@ public class GLMASRModel: Module {
             generatedTokens.append(nextToken)
 
             if verbose {
-                print(ctx.decode(nextToken), terminator: "")
+                print(try ctx.decode(nextToken), terminator: "")
             }
 
             // S13: per-token signpost (Level 4 = .verbose). Strips in release builds.
@@ -524,7 +524,7 @@ public class GLMASRModel: Module {
 
         Memory.clearCache()
 
-        let text = ctx.decode(generatedTokens)
+        let text = try ctx.decode(generatedTokens)
         let totalTime = endTime.timeIntervalSince(startTime)
 
         return STTOutput(
@@ -586,7 +586,7 @@ public class GLMASRModel: Module {
                 guard let strongSelf = self else {
                     throw STTError.modelNotInitialized("Model deallocated before generation")
                 }
-                let (context, promptTokenCount) = strongSelf.prepareGeneration(audio: audio, tokenizer: tokenizer)
+                let (context, promptTokenCount) = try strongSelf.prepareGeneration(audio: audio, tokenizer: tokenizer)
                 var ctx = context
 
                 let prefillEndTime = Date()
@@ -609,7 +609,7 @@ public class GLMASRModel: Module {
                     generatedTokens.append(nextToken)
 
                     // Emit token
-                    let tokenText = ctx.decode(nextToken)
+                    let tokenText = try ctx.decode(nextToken)
                     continuation.yield(.token(tokenText))
 
                     // S13: per-token signpost (Level 4 = .verbose). Strips in release builds.
@@ -644,7 +644,7 @@ public class GLMASRModel: Module {
                 continuation.yield(.info(info))
 
                 // Emit final result
-                let text = ctx.decode(generatedTokens)
+                let text = try ctx.decode(generatedTokens)
                 let output = STTOutput(
                     text: text.trimmingCharacters(in: .whitespacesAndNewlines),
                     promptTokens: promptTokenCount,
@@ -879,7 +879,7 @@ public class GLMASRModel: Module {
     }
 
     /// Prepare generation context with audio encoding and prompt setup.
-    private func prepareGeneration(audio: MLXArray, tokenizer: Tokenizers.Tokenizer) -> (GenerationContext, Int) {
+    private func prepareGeneration(audio: MLXArray, tokenizer: Tokenizers.Tokenizer) throws -> (GenerationContext, Int) {
         // Preprocess audio to mel spectrogram
         let mel = preprocessAudio(audio)
 
@@ -888,14 +888,14 @@ public class GLMASRModel: Module {
         eval(audioEmbeds)
 
         // Build prompt tokens
-        var tokens = tokenizer.encode(text: PromptTemplate.userPrefix)
+        var tokens = try tokenizer.encode(text: PromptTemplate.userPrefix)
         tokens.append(contentsOf: Array(repeating: 0, count: audioLen))
-        tokens.append(contentsOf: tokenizer.encode(text: PromptTemplate.userSuffix))
+        tokens.append(contentsOf: try tokenizer.encode(text: PromptTemplate.userSuffix))
 
         let inputIds = MLXArray(tokens.map { Int32($0) }).expandedDimensions(axis: 0)
         let promptTokenCount = inputIds.shape[1]
 
-        let audioStart = tokenizer.encode(text: PromptTemplate.userPrefix).count
+        let audioStart = try tokenizer.encode(text: PromptTemplate.userPrefix).count
         let audioOffsets = [[audioStart]]
         let audioLength = [[audioLen]]
 

@@ -316,14 +316,14 @@ public final class Qwen3TTSModel: Module, SpeechGenerationModel, @unchecked Send
         // Template: "<|im_start|>assistant\n{refText}<|im_end|>\n"
         // Skip first 3 tokens (<|im_start|>assistant\n) and last 2 (<|im_end|>\n)
         let refChat = "<|im_start|>assistant\n\(refText)<|im_end|>\n"
-        let refChatIds = MLXArray(tokenizer.encode(text: refChat).map { Int32($0) }).reshaped(1, -1)
+        let refChatIds = MLXArray(try tokenizer.encode(text: refChat).map { Int32($0) }).reshaped(1, -1)
         let refTextIds = refChatIds[0..., 3 ..< (refChatIds.dim(1) - 2)]
 
         // --- Step 2: Tokenize target text ---
         // Template: "<|im_start|>assistant\n{text}<|im_end|>\n<|im_start|>assistant\n"
         // Skip first 3 and last 5 tokens
         let targetChat = "<|im_start|>assistant\n\(text)<|im_end|>\n<|im_start|>assistant\n"
-        let targetIds = MLXArray(tokenizer.encode(text: targetChat).map { Int32($0) }).reshaped(1, -1)
+        let targetIds = MLXArray(try tokenizer.encode(text: targetChat).map { Int32($0) }).reshaped(1, -1)
         let textIds = targetIds[0..., 3 ..< (targetIds.dim(1) - 5)]
 
         // --- Step 3: TTS special token embeddings ---
@@ -415,7 +415,7 @@ public final class Qwen3TTSModel: Module, SpeechGenerationModel, @unchecked Send
         var instructEmbed: MLXArray? = nil
         if let instruct, !instruct.isEmpty {
             let instructText = "<|im_start|>user\n\(instruct)<|im_end|>\n"
-            let instructIds = MLXArray(tokenizer.encode(text: instructText).map { Int32($0) }).reshaped(1, -1)
+            let instructIds = MLXArray(try tokenizer.encode(text: instructText).map { Int32($0) }).reshaped(1, -1)
             instructEmbed = talker.textProjection(talker.getTextEmbeddings()(instructIds))
         }
 
@@ -627,7 +627,7 @@ public final class Qwen3TTSModel: Module, SpeechGenerationModel, @unchecked Send
         case .voiceDesign:
             // VoiceDesign: voice parameter is the instruct (voice description)
             // Ignore the separate instruct parameter for VoiceDesign models
-            return generateVoiceDesign(
+            return try generateVoiceDesign(
                 text: text,
                 instruct: voice,
                 language: lang,
@@ -764,7 +764,7 @@ public final class Qwen3TTSModel: Module, SpeechGenerationModel, @unchecked Send
 
                 switch path {
                 case .voiceDesign:
-                    audio = generateVoiceDesign(
+                    audio = try generateVoiceDesign(
                         text: text,
                         instruct: voice,
                         language: lang,
@@ -1193,18 +1193,18 @@ public final class Qwen3TTSModel: Module, SpeechGenerationModel, @unchecked Send
         maxTokens: Int,
         onToken: ((Int) -> Void)? = nil,
         onInfo: ((AudioGenerationInfo) -> Void)? = nil
-    ) -> MLXArray {
+    ) throws -> MLXArray {
         guard let speechTokenizer, let tokenizer else {
-            return MLXArray.zeros([1])
+            throw AudioGenerationError.tokenizerNotLoaded
         }
 
         // Prepare inputs
-        let (inputEmbeds, trailingTextHidden, ttsPadEmbed) = prepareGenerationInputs(
+        let (inputEmbeds, trailingTextHidden, ttsPadEmbed) = try prepareGenerationInputs(
             text: text, language: language, instruct: instruct
         )
 
         // Cap max tokens based on text length
-        let targetTokenCount = tokenizer.encode(text: text).count
+        let targetTokenCount = try tokenizer.encode(text: text).count
         let effectiveMaxTokens = min(maxTokens, max(75, targetTokenCount * 6))
 
         // Run the shared autoregressive generation loop
@@ -1288,7 +1288,7 @@ public final class Qwen3TTSModel: Module, SpeechGenerationModel, @unchecked Send
         )
 
         // Cap max tokens based on text length
-        let targetTokenCount = tokenizer.encode(text: text).count
+        let targetTokenCount = try tokenizer.encode(text: text).count
         let effectiveMaxTokens = min(maxTokens, max(75, targetTokenCount * 6))
 
         // Run the shared autoregressive generation loop
@@ -1385,7 +1385,7 @@ public final class Qwen3TTSModel: Module, SpeechGenerationModel, @unchecked Send
         )
 
         // Cap max tokens
-        let targetTokenCount = tokenizer.encode(text: text).count
+        let targetTokenCount = try tokenizer.encode(text: text).count
         let effectiveMaxTokens = min(maxTokens, max(75, targetTokenCount * 6))
 
         let startTime = Date()
@@ -1479,7 +1479,7 @@ public final class Qwen3TTSModel: Module, SpeechGenerationModel, @unchecked Send
         )
 
         // Step 2: Cap max tokens based on text length
-        let targetTokenCount = tokenizer.encode(text: text).count
+        let targetTokenCount = try tokenizer.encode(text: text).count
         let effectiveMaxTokens = min(maxTokens, max(200, targetTokenCount * 12))
 
         // Step 3: Use caller's repetition penalty
@@ -1606,7 +1606,7 @@ public final class Qwen3TTSModel: Module, SpeechGenerationModel, @unchecked Send
 
         // --- Tokenize text with ChatML template ---
         let chatText = "<|im_start|>assistant\n\(text)<|im_end|>\n<|im_start|>assistant\n"
-        let inputIds = MLXArray(tokenizer.encode(text: chatText).map { Int32($0) }).reshaped(1, -1)
+        let inputIds = MLXArray(try tokenizer.encode(text: chatText).map { Int32($0) }).reshaped(1, -1)
         let textEmbed = talker.textProjection(talker.getTextEmbeddings()(inputIds))
 
         // --- TTS special token embeddings ---
@@ -1666,7 +1666,7 @@ public final class Qwen3TTSModel: Module, SpeechGenerationModel, @unchecked Send
         var instructEmbed: MLXArray? = nil
         if let instruct, !instruct.isEmpty {
             let instructText = "<|im_start|>user\n\(instruct)<|im_end|>\n"
-            let instructIds = MLXArray(tokenizer.encode(text: instructText).map { Int32($0) }).reshaped(1, -1)
+            let instructIds = MLXArray(try tokenizer.encode(text: instructText).map { Int32($0) }).reshaped(1, -1)
             instructEmbed = talker.textProjection(talker.getTextEmbeddings()(instructIds))
         }
 
@@ -1717,14 +1717,14 @@ public final class Qwen3TTSModel: Module, SpeechGenerationModel, @unchecked Send
         text: String,
         language: String,
         instruct: String?
-    ) -> (MLXArray, MLXArray, MLXArray) {
+    ) throws -> (MLXArray, MLXArray, MLXArray) {
         guard let tokenizer, let talkerConfig = config.talkerConfig else {
-            fatalError("Tokenizer/config not loaded")
+            throw AudioGenerationError.modelNotInitialized("Tokenizer/config not loaded")
         }
 
         // Tokenize text with ChatML template
         let chatText = "<|im_start|>assistant\n\(text)<|im_end|>\n<|im_start|>assistant\n"
-        let inputIds = MLXArray(tokenizer.encode(text: chatText).map { Int32($0) }).reshaped(1, -1)
+        let inputIds = MLXArray(try tokenizer.encode(text: chatText).map { Int32($0) }).reshaped(1, -1)
 
         // Get text embeddings
         let textEmbed = talker.textProjection(talker.getTextEmbeddings()(inputIds))
@@ -1774,7 +1774,7 @@ public final class Qwen3TTSModel: Module, SpeechGenerationModel, @unchecked Send
         var instructEmbed: MLXArray? = nil
         if let instruct, !instruct.isEmpty {
             let instructText = "<|im_start|>user\n\(instruct)<|im_end|>\n"
-            let instructIds = MLXArray(tokenizer.encode(text: instructText).map { Int32($0) }).reshaped(1, -1)
+            let instructIds = MLXArray(try tokenizer.encode(text: instructText).map { Int32($0) }).reshaped(1, -1)
             instructEmbed = talker.textProjection(talker.getTextEmbeddings()(instructIds))
         }
 

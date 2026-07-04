@@ -1520,7 +1520,7 @@ struct Qwen3ASRTests {
         let model = try await Qwen3ASRModel.fromPretrained("mlx-community/Qwen3-ASR-0.6B-4bit")
         print("\u{001B}[32mQwen3 ASR model loaded!\u{001B}[0m")
 
-        let output = model.generate(audio: audioData)
+        let output = try model.generate(audio: audioData)
         print("\u{001B}[32m Qwen3 ASR Transcription: \(output.text)\u{001B}[0m")
         print("\u{001B}[32m Qwen3 ASR Generation Stats: \(output)\u{001B}[0m")
 
@@ -1585,7 +1585,7 @@ struct Qwen3ASRTests {
         let transcript = "Coffee's story likely begins in Ethiopia, where legend tells of a goat herder named Kaldi, who notices goats became energetic after eating red berries from a particular bush. Curious, he tried them himself and felt invigorated."
 
         print("\u{001B}[33mRunning forced alignment...\u{001B}[0m")
-        let result = model.generate(audio: audioData, text: transcript, language: "English")
+        let result = try model.generate(audio: audioData, text: transcript, language: "English")
 
         print("\u{001B}[32m Qwen3 ForcedAligner Result:\u{001B}[0m")
         for item in result.items {
@@ -1627,7 +1627,7 @@ struct GLMASRTests {
         let model = try await GLMASRModel.fromPretrained("mlx-community/GLM-ASR-Nano-2512-4bit")
         print("\u{001B}[32mGLMASR model loaded!\u{001B}[0m")
 
-        let output = model.generate(audio: audioData)
+        let output = try model.generate(audio: audioData)
         print("\u{001B}[32m GLMASR Transcription: \(output.text)\u{001B}[0m")
         print("\u{001B}[32m GLMASR Generation Stats: \(output)\u{001B}[0m")
 

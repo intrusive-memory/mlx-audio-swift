@@ -1,3 +1,8 @@
+---
+type: reference
+updated: 2026-07-04
+---
+
 # AI Agent Instructions for mlx-audio-swift
 
 ## Project Overview
@@ -48,6 +53,22 @@ xcodebuild test -scheme MLXAudio-Package -destination 'platform=macOS' \
 - **Swift version**: 6.2+
 - **Platforms**: macOS 26+, iOS 26+
 - **CI runner**: `macos-26`
+
+## Queryable Codemap
+
+A prebuilt [graphify](https://pypi.org/project/graphifyy/) knowledge graph of this
+codebase lives in [`graphify-out/`](graphify-out/) (4011 nodes · 8336 edges). **Prefer
+querying it before grepping** for architecture or "what connects to what" questions:
+
+```bash
+graphify query "How does X flow through the system?"
+graphify path "TypeA" "TypeB"      # shortest path between two nodes
+graphify explain "SomeType"        # plain-language node explanation
+```
+
+Human-readable summary: [`graphify-out/GRAPH_REPORT.md`](graphify-out/GRAPH_REPORT.md).
+Refresh after significant changes with `/codemap` (or
+`graphify . --backend claude-cli`).
 
 ## Repository Structure
 

@@ -1,3 +1,8 @@
+---
+type: doc
+updated: 2026-07-04
+---
+
 # Changelog
 
 All notable changes to mlx-audio-swift are documented in this file.
@@ -5,6 +10,17 @@ All notable changes to mlx-audio-swift are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+
+## [0.10.0] - 2026-07-04
+
+### Changed
+
+- **swift-tokenizers upgraded 0.5.0 → 0.7.1 (typed-throws migration)**: the dependency now floats on `.upToNextMinor(from: "0.7.1")`. swift-tokenizers 0.6.0 converted the `Tokenizer` protocol to typed throws (`throws(TokenizerError)`); this release adopts and propagates that across every tokenizer call site (GLM-ASR, Qwen3-ASR + forced aligner, LlamaTTS, Marvis TTS, Qwen3, Qwen3-TTS, Soprano). **This is a source-breaking change for consumers** that catch errors from the tokenizer-facing APIs — hence the minor version bump to 0.10.0. See `docs/TODO_TOKENIZERS_0_6_MIGRATION.md`. 0.7.x also ships the Hugging Face Rust `tokenizers` crate as an SE-0482 `staticLibrary` artifactbundle, resolving the earlier Xcode module-map blocker that pinned the project to 0.5.x. Requires Swift 6.2 / Xcode 26.
+- **SwiftAcervo upgraded 0.19.2 → 0.23.0**: pins to the latest published release for shared model resolution and caching.
+
+### Documentation
+
+- **`breathOffsets` / Glosa integration contract**: added `REQUIREMENTS-glosa-integration.md` pinning the `breathOffsets` contract for upstream Glosa consumers. No code change was required — the breath happy-path API shipped in v0.9.0. One of four coordinated docs across SwiftCompartido, SwiftVoxAlta, and glosa-av.
 
 ## [0.9.0] - 2026-06-16
 

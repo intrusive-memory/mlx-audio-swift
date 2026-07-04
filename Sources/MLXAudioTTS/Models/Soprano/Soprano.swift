@@ -488,7 +488,7 @@ public class SopranoModel: Module, KVCacheDimensionProvider, SpeechGenerationMod
     /// Pattern: `\s+|\w+|[^\w\s]+` with behavior "Isolated"
     private let preTokenizePattern = #"\s+|\w+|[^\w\s]+"#
 
-    private func tokenize(_ text: String) -> MLXArray {
+    private func tokenize(_ text: String) throws -> MLXArray {
         guard let tokenizer = tokenizer else {
             fatalError("Tokenizer not initialized")
         }
@@ -502,7 +502,7 @@ public class SopranoModel: Module, KVCacheDimensionProvider, SpeechGenerationMod
         for segment in segments {
             if isSpecialToken(segment) {
                 // Special tokens are handled directly by the tokenizer
-                let tokens = tokenizer.encode(text: segment, addSpecialTokens: false)
+                let tokens = try tokenizer.encode(text: segment, addSpecialTokens: false)
                 allTokens.append(contentsOf: tokens)
             } else {
                 // For regular text, pre-tokenize to handle spaces correctly
@@ -519,7 +519,7 @@ public class SopranoModel: Module, KVCacheDimensionProvider, SpeechGenerationMod
                         }
                     } else {
                         // Use tokenizer for non-whitespace chunks
-                        let chunkTokens = tokenizer.encode(text: chunk, addSpecialTokens: false)
+                        let chunkTokens = try tokenizer.encode(text: chunk, addSpecialTokens: false)
                         allTokens.append(contentsOf: chunkTokens)
                     }
                 }
@@ -675,7 +675,7 @@ public class SopranoModel: Module, KVCacheDimensionProvider, SpeechGenerationMod
 
 
             for (promptText, _, _) in sentenceData {
-                let inputIds = self.tokenize(promptText)
+                let inputIds = try self.tokenize(promptText)
                 var allHiddenStates: [MLXArray] = []
 
                 for await (token, hiddenState) in self.streamGenerate(
@@ -778,7 +778,7 @@ public class SopranoModel: Module, KVCacheDimensionProvider, SpeechGenerationMod
                 let maxTokens = parameters.maxTokens ?? 512
 
                 for (promptText, _, _) in sentenceData {
-                    let inputIds = self.tokenize(promptText)
+                    let inputIds = try self.tokenize(promptText)
                     var allHiddenStates: [MLXArray] = []
 
                     for await (token, hiddenState) in self.streamGenerate(

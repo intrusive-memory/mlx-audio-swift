@@ -65,6 +65,10 @@ public enum AudioGenerationError: Error, LocalizedError {
     case invalidInput(String)
     case audioDecodingFailed(String)
     case audioEncodingFailed(String)
+    /// The text tokenizer was required but has not been loaded. Surfaced as a
+    /// typed error instead of a force-unwrap trap (see swift-tokenizers 0.6+
+    /// typed-throws migration).
+    case tokenizerNotLoaded
 
     public var errorDescription: String? {
         switch self {
@@ -78,6 +82,8 @@ public enum AudioGenerationError: Error, LocalizedError {
             return "Audio decoding failed: \(message)"
         case .audioEncodingFailed(let message):
             return "Audio encoding failed: \(message)"
+        case .tokenizerNotLoaded:
+            return "Tokenizer not loaded"
         }
     }
 }
