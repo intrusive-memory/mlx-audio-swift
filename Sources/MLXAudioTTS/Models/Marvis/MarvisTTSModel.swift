@@ -103,12 +103,12 @@ public final class MarvisTTSModel: Module {
         )
     }
     
-    private func tokenizeTextSegment(text: String, speaker: Int) -> (MLXArray, MLXArray) {
+    private func tokenizeTextSegment(text: String, speaker: Int) throws -> (MLXArray, MLXArray) {
         let K = model.args.audioNumCodebooks
         let frameW = K + 1
         
         let prompt = "[\(speaker)]" + text
-        let ids = MLXArray(_textTokenizer.encode(text: prompt))
+        let ids = MLXArray(try _textTokenizer.encode(text: prompt))
         
         let T = ids.shape[0]
         var frame = MLXArray.zeros([T, frameW], type: Int32.self)
@@ -177,7 +177,7 @@ public final class MarvisTTSModel: Module {
     }
     
     private func tokenizeSegment(_ segment: Segment, addEOS: Bool = true) throws -> (MLXArray, MLXArray) {
-        let (txt, txtMask) = tokenizeTextSegment(text: segment.text, speaker: segment.speaker)
+        let (txt, txtMask) = try tokenizeTextSegment(text: segment.text, speaker: segment.speaker)
         let (aud, audMask) = try tokenizeAudio(segment.audio, addEOS: addEOS)
         return (concatenated([txt, aud], axis: 0), concatenated([txtMask, audMask], axis: 0))
     }

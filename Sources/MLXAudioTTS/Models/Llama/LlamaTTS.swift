@@ -479,7 +479,9 @@ public class LlamaTTSModel: Module, KVCacheDimensionProvider, SpeechGenerationMo
         voice: String? = nil,
         refAudio: MLXArray? = nil,
         refText: String? = nil
-    ) -> (MLXArray, MLXArray) {
+    ) throws -> (MLXArray, MLXArray) {
+
+        guard let tokenizer else { throw AudioGenerationError.tokenizerNotLoaded }
 
         var audioInputIds: MLXArray?
         var audioTranscriptIds: MLXArray?
@@ -495,7 +497,7 @@ public class LlamaTTSModel: Module, KVCacheDimensionProvider, SpeechGenerationMo
 
             let codes = llamaEncodeAudioToCodes(audio: refAudio, snacModel: snacModel)
             audioInputIds = codes + OrpheusTokens.audioTokenOffset
-            let encodedIds = tokenizer!.encode(text: refText)
+            let encodedIds = try tokenizer.encode(text: refText)
             audioTranscriptIds = MLXArray(encodedIds.map { Int32($0) }).expandedDimensions(axis: 0)
         }
 
@@ -515,7 +517,7 @@ public class LlamaTTSModel: Module, KVCacheDimensionProvider, SpeechGenerationMo
         // Encode all prompts
         var promptInputIds: [MLXArray] = []
         for prompt in modifiedPrompts {
-            let encodedIds = tokenizer!.encode(text: prompt)
+            let encodedIds = try tokenizer.encode(text: prompt)
             let encoded = MLXArray(encodedIds.map { Int32($0) }).expandedDimensions(axis: 0)
             promptInputIds.append(encoded)
         }
@@ -817,7 +819,7 @@ public class LlamaTTSModel: Module, KVCacheDimensionProvider, SpeechGenerationMo
         let prompt = text.replacingOccurrences(of: "\\n", with: "\n")
             .replacingOccurrences(of: "\\t", with: "\t")
 
-        let (inputIds, _) = prepareInputIds(
+        let (inputIds, _) = try prepareInputIds(
             prompts: [prompt],
             voice: voice,
             refAudio: refAudio,
@@ -947,7 +949,7 @@ public class LlamaTTSModel: Module, KVCacheDimensionProvider, SpeechGenerationMo
                 let prompt = text.replacingOccurrences(of: "\\n", with: "\n")
                     .replacingOccurrences(of: "\\t", with: "\t")
                 
-                let (inputIds, _) = self.prepareInputIds(
+                let (inputIds, _) = try self.prepareInputIds(
                     prompts: [prompt],
                     voice: voice,
                     refAudio: refAudio,

@@ -435,9 +435,9 @@ public class Qwen3ForcedAlignerModel: Module {
         audio: MLXArray,
         text: String,
         language: String = "English"
-    ) -> ForcedAlignResult {
+    ) throws -> ForcedAlignResult {
         guard let tokenizer = tokenizer else {
-            fatalError("Tokenizer not loaded")
+            throw AudioGenerationError.tokenizerNotLoaded
         }
 
         let startTime = Date()
@@ -452,7 +452,7 @@ public class Qwen3ForcedAlignerModel: Module {
             with: String(repeating: "<|audio_pad|>", count: numAudioTokens)
         )
 
-        let inputIdsList = tokenizer.encode(text: expandedText)
+        let inputIdsList = try tokenizer.encode(text: expandedText)
         let inputIds = MLXArray(inputIdsList.map { Int32($0) }).expandedDimensions(axis: 0)
         let promptTokenCount = inputIds.dim(1)
 

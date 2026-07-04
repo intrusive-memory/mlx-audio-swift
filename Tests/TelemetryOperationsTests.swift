@@ -467,7 +467,7 @@ struct TelemetryOperationsTests {
 
         let audio = MLXArray.zeros([16000], type: Float32.self)
         let events = try await runWithRecorder { _ in
-            _ = model.generate(audio: audio, maxTokens: 1)
+            _ = try model.generate(audio: audio, maxTokens: 1)
         }
 
         assertOneInterval(events: events, name: "Qwen3ASR.generate", subsystem: "MLXAudio.qwen3ASR",
@@ -486,7 +486,7 @@ struct TelemetryOperationsTests {
 
         let audio = MLXArray.zeros([16000], type: Float32.self)
         let events = try await runWithRecorder { _ in
-            _ = model.generate(audio: audio, maxTokens: 1)
+            _ = try model.generate(audio: audio, maxTokens: 1)
         }
 
         assertOneInterval(events: events, name: "GLMASR.generate", subsystem: "MLXAudio.glmASR",
