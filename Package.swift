@@ -90,7 +90,7 @@ let package = Package(
         sibling(
           "SwiftAcervo",
           remote: "https://github.com/intrusive-memory/SwiftAcervo.git",
-          from: "0.23.0"),
+          from: "0.25.0"),
         .package(url: "https://github.com/apple/swift-numerics",
             .upToNextMajor(from: "1.1.1")),
         .package(url: "https://github.com/apple/swift-collections.git",
@@ -216,7 +216,12 @@ let package = Package(
 
         .executableTarget(
             name: "mlx-audio-swift-tts",
-            dependencies: ["MLXAudioCore", "MLXAudioTTS", "MLXAudioSTT"],
+            dependencies: [
+                "MLXAudioCore", "MLXAudioTTS", "MLXAudioSTT",
+                // printUsage() renders Acervo.environmentHelp() so the model
+                // storage variables are documented here, not restated by hand.
+                .product(name: "SwiftAcervo", package: "SwiftAcervo"),
+            ],
             path: "Sources/mlx-audio-swift-tts"
         ),
 
