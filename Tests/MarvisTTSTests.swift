@@ -247,11 +247,11 @@ struct MarvisTTSModuleSetupTests {
 
     /// Assert that CSMLlamaModel.newCache(parameters:) returns one KVCache per hidden layer.
     /// CSMLlamaModel conforms to KVCacheDimensionProvider, so the cache count is driven by kvHeads.count.
-    @Test func marvisMakeCacheReturnsExpectedShape() {
+    @Test func marvisMakeCacheReturnsExpectedShape() throws {
         let config = makeTinyCSMLlamaConfig()
         let model = CSMLlamaModel(config)
 
-        let cache = model.newCache(parameters: nil)
+        let cache = try model.newCache(parameters: nil)
 
         // Cache count must match the number of transformer layers in config
         #expect(cache.count == config.hiddenLayers,
