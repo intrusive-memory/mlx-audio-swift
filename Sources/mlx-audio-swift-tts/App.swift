@@ -4,6 +4,7 @@ import Foundation
 import MLXAudioCore
 import MLXAudioTTS
 import MLXLMCommon
+import SwiftAcervo
 
 enum AppError: Error, LocalizedError, CustomStringConvertible {
     case invalidRepositoryID(String)
@@ -272,6 +273,8 @@ struct CLI {
               --temperature <float>    Sampling temperature. Default: 0.7
               --top_p <float>          Top-p sampling. Default: 0.9
           -h, --help                    Show this help
+
+        \(Acervo.environmentHelp())
         """)
     }
 }

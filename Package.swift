@@ -35,9 +35,9 @@ let package = Package(
     ],
     dependencies: [
         .package(url: "https://github.com/ml-explore/mlx-swift.git",
-            .upToNextMajor(from: "0.31.3")),
+            .upToNextMajor(from: "0.32.3")),
         .package(url: "https://github.com/ml-explore/mlx-swift-lm.git",
-            .upToNextMajor(from: "3.31.3")),
+            .upToNextMajor(from: "3.32.3")),
         // swift-tokenizers ships the Hugging Face Rust `tokenizers` crate as a
         // binary backend (an SE-0482 `staticLibrary` artifactbundle since
         // 0.7.x; an XCFramework in 0.5.x). 0.6.x briefly had an Xcode module-map
@@ -48,14 +48,14 @@ let package = Package(
         // (`throws(TokenizerError)`); this repo adopts and propagates that (see
         // docs/TODO_TOKENIZERS_0_6_MIGRATION.md). Requires Swift 6.2 / Xcode 26.
         .package(url: "https://github.com/DePasqualeOrg/swift-tokenizers.git",
-            .upToNextMinor(from: "0.7.1")),
-        .package(url: "https://github.com/intrusive-memory/SwiftAcervo.git", .upToNextMajor(from: "0.23.0")),
+            .upToNextMinor(from: "0.7.4")),
+        .package(url: "https://github.com/intrusive-memory/SwiftAcervo.git", .upToNextMajor(from: "0.25.0")),
         .package(url: "https://github.com/apple/swift-numerics",
             .upToNextMajor(from: "1.1.1")),
         .package(url: "https://github.com/apple/swift-collections.git",
-            .upToNextMajor(from: "1.4.1")),
+            .upToNextMajor(from: "1.7.5")),
         .package(url: "https://github.com/apple/swift-crypto.git",
-            .upToNextMajor(from: "4.5.0")),
+            .upToNextMajor(from: "4.5.2")),
     ],
     targets: [
         // MARK: - MLXAudioCore
@@ -175,7 +175,12 @@ let package = Package(
 
         .executableTarget(
             name: "mlx-audio-swift-tts",
-            dependencies: ["MLXAudioCore", "MLXAudioTTS", "MLXAudioSTT"],
+            dependencies: [
+                "MLXAudioCore", "MLXAudioTTS", "MLXAudioSTT",
+                // printUsage() renders Acervo.environmentHelp() so the model
+                // storage variables are documented here, not restated by hand.
+                .product(name: "SwiftAcervo", package: "SwiftAcervo"),
+            ],
             path: "Sources/mlx-audio-swift-tts"
         ),
 

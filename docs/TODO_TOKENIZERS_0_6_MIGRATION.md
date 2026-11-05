@@ -8,7 +8,7 @@ type: doc
 
 **Why 0.7.1 and not 0.6.x:** The original blocker for leaving 0.5.x was an Xcode module-map bug in the 0.6.x XCFramework (the 0.6.2 "Temporary fix for Xcode builds" commit 37f999a). 0.7.x replaced the XCFramework with an SE-0482 `staticLibrary` artifactbundle, which resolves and compiles cleanly under `xcodebuild` — verified empirically. So we skipped 0.6.x and went straight to 0.7.1. (Both 0.5.x and 0.7.x are Rust-backed; the old pin comment claiming "0.5.0 is Swift-only" was incorrect.) Requires Swift 6.2 / Xcode 26.
 
-**Versioning impact:** This is a **source-breaking change for consumers of mlx-audio-swift** (see "Migration philosophy" below). The migration missed the 0.9.0 train (0.9.0 shipped the breath-phrasing feature without it), so it ships as **0.10.0**, not 0.9.0. `MLXAudio.version` is now `0.10.0`.
+**Versioning impact:** This is a **source-breaking change for consumers of mlx-audio-swift** (see "Migration philosophy" below). The migration missed the 0.9.0 train (0.9.0 shipped the breath-phrasing feature without it), so it ships as **0.10.0**, not 0.9.0. `MLXAudio.version` is now `0.10.0-dev`.
 
 **Owner:** Tom Stovall
 **Last updated:** 2026-07-04
