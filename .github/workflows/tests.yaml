@@ -26,7 +26,7 @@ env:
 jobs:
   code-quality:
     name: Code Quality
-    runs-on: macos-26
+    runs-on: xcode-27
 
     steps:
       - name: Checkout code
@@ -72,7 +72,7 @@ jobs:
 
   macos-tests:
     name: macOS Tests
-    runs-on: macos-26
+    runs-on: xcode-27
     needs: code-quality
 
     steps:
@@ -103,7 +103,7 @@ jobs:
 
   download-models:
     name: Download Models
-    runs-on: macos-26
+    runs-on: xcode-27
     outputs:
       cache-hit: ${{ steps.model-cache.outputs.cache-hit }}
 
@@ -139,7 +139,7 @@ jobs:
 
   model-tests:
     name: Model Tests
-    runs-on: macos-26
+    runs-on: xcode-27
     needs: [macos-tests, download-models]
     # DISABLED for the SwiftAcervo 0.16 upgrade window.
     # These suites call Acervo.ensureComponentReady(), which fetches the CDN
